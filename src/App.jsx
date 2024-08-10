@@ -1,10 +1,13 @@
-import './App.css'
 import HomePage from './components/HomePage';
+import LoginPage from './components/signupLoginPage';
 
 function App() {
 
   return (
-      <HomePage />
+      <div>
+        <HomePage />
+        <LoginPage />
+      </div>
   )
 }
 

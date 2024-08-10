@@ -27,7 +27,7 @@ const TypographyNumStyle = styled('typography')({
     fontSize:'25px'
 });
 const TypographyStrStyle = styled('typography')({
-    fontFamily:'IRANYekanWeb',
+    fontFamily:'font1',
     fontSize:'18px'
 });
 
