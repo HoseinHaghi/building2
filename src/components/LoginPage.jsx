@@ -143,6 +143,7 @@ function ErrorBar({ message, onClose }) {
 
       {/* Message area */}
       <Box
+        dir="rtl"
         sx={{
           flex: 1,
           bgcolor: "#e53935",

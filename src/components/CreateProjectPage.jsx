@@ -35,14 +35,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import api from "../lib/api";
 import {useAction} from "../hooks/useAction";
 import {useAuth} from "../auth/AuthContext";
-function readDraft(key) {
-  try {
-    const draft = JSON.parse(sessionStorage.getItem(key) || "null");
-    return draft && typeof draft === "object" && !Array.isArray(draft) ? draft : null;
-  } catch {
-    return null;
-  }
-}
+import {readSessionDraft as readDraft,useSessionDraft} from "../hooks/useSessionDraft";
 
 // Explain: Section header for shared styled components used throughout the page.
 /* ===============================================================
@@ -170,15 +163,14 @@ const CustomSwitch = styled(Switch)({
 function TabCustom({ isLocked, selectedBreadcrumb, selectedId }) {
   const action=useAction(),auth=useAuth();
   const draftKey="createProjectDraft:"+auth.user.id;
-  const initialDraft=useRef(readDraft(draftKey) || {});
-  // Explain: Whether the new project should be created under a parent.
-  const [isSubProject, setIsSubProject] = useState(initialDraft.current.isSubProject || !!selectedId);
-  // Explain: Title input state for the project name.
-  const [title, setTitle] = useState(initialDraft.current.title || "");
-  // Explain: Human-readable breadcrumb of the selected parent project.
-  const [breadcrumb, setBreadcrumb] = useState(selectedBreadcrumb || initialDraft.current.breadcrumb || "");
-  // Explain: The selected parent project's id (if any).
-  const [selectedParentId, setSelectedParentId] = useState(selectedId || initialDraft.current.selectedParentId || null);
+  const [draft,updateDraft]=useSessionDraft(draftKey,{
+    title:"",isSubProject:!!selectedId,breadcrumb:selectedBreadcrumb || "",selectedParentId:selectedId || null,
+  });
+  const {title,isSubProject,breadcrumb,selectedParentId}=draft;
+  const setTitle=title=>updateDraft({title});
+  const setIsSubProject=isSubProject=>updateDraft({isSubProject});
+  const setBreadcrumb=breadcrumb=>updateDraft({breadcrumb});
+  const setSelectedParentId=selectedParentId=>updateDraft({selectedParentId});
 
   // Explain: Form completeness checker—only title is required to enable create.
   const isFormComplete = title.trim().length > 0;
@@ -188,15 +180,9 @@ function TabCustom({ isLocked, selectedBreadcrumb, selectedId }) {
   // Explain: Router navigator to switch pages programmatically.
   const navigate = useNavigate();
 
-  // Explain: When router-provided breadcrumb changes, sync it to local state.
-  useEffect(() => {
-    if (selectedBreadcrumb) setBreadcrumb(selectedBreadcrumb);
-  }, [selectedBreadcrumb]);
-
-  // Explain: When router-provided id changes, sync the selected parent id.
-  useEffect(() => {
-    if(selectedId)setSelectedParentId(selectedId);
-  }, [selectedId]);
+  useEffect(()=>{
+    if(selectedId)updateDraft({isSubProject:true,selectedParentId:selectedId,breadcrumb:selectedBreadcrumb || ""});
+  },[selectedId,selectedBreadcrumb,updateDraft]);
 
   // Explain: Helper to reset all form fields and clear stored draft.
   const resetForm = () => {
@@ -209,7 +195,6 @@ function TabCustom({ isLocked, selectedBreadcrumb, selectedId }) {
     // Explain: Remove selected parent link.
     setSelectedParentId(null);
     // Explain: Delete any persisted draft in sessionStorage.
-    initialDraft.current = {};
     try {
       sessionStorage.removeItem(draftKey);
     } catch { /* The form still resets if browser storage is unavailable. */ }

@@ -1,5 +1,7 @@
 # Verification — 2026-10-13
 
+On 2026-10-17, the eight usability repairs passed lint, the production build, all 23 API tests and all 10 Chromium tests. Four new browser scenarios verify project/work/edit drafts after reload, preservation and actual upload of both selected files across project-picker confirmation and cancellation, optional prerequisites, report editing/deletion with cancellation, reopening completed work, project renaming, rejection of non-empty project deletion, empty-project deletion, confirmed dashboard work deletion, and logout in both sidebar states. Member tests also verify that another author's reports cannot be edited/deleted through either the interface or direct API calls. The four scenarios passed again after the final dialog styling adjustment. Form, report-editor, project-rename and deletion-confirmation screenshots were visually reviewed. Browser tests use a temporary database; the existing local account and uploads are not modified. Unsubmitted files survive picker navigation in tab memory; a full page reload still requires selecting those files again.
+
 Verified locally on Windows with Node 24.21.0.
 
 | Check | Result |

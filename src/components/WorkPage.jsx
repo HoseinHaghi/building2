@@ -45,6 +45,8 @@ import { useParams, useLocation, useNavigate } from "react-router-dom";
 import {useWork,useReports,useMembers} from "../hooks/useWorks";
 import {useQueryClient} from "@tanstack/react-query";
 import api,{fileUrl,errorMessage} from "../lib/api";
+import {useAction} from "../hooks/useAction";
+import {ConfirmDialog,TextDialog} from "./shared";
 
 /* ------------------------------ Icons ------------------------------ */
 import DeleteOutlineRoundedIcon from "@mui/icons-material/esm/DeleteOutlineRounded.js";
@@ -245,10 +247,25 @@ function WorkPage() {
 
   const members=work?.assignees || [];
   const reports=(reportQuery.data || []).map(report=>({
-    user:report.author.name,text:report.text,date:new Intl.DateTimeFormat("fa-IR").format(new Date(report.createdAt)),
+    id:report.id,canEdit:report.canEdit,user:report.author.name,text:report.text,date:new Intl.DateTimeFormat("fa-IR").format(new Date(report.createdAt)),
   }));
   const [addOpen,setAddOpen]=React.useState(false),[newText,setNewText]=React.useState(""),[busy,setBusy]=React.useState(false);
   const [editOpen,setEditOpen]=React.useState(false),[searchText,setSearchText]=React.useState("");
+  const reportAction=useAction();
+  const [reportEditor,setReportEditor]=React.useState(null),[confirmation,setConfirmation]=React.useState(null);
+  const saveReport=async text=>{
+    if(reportAction.pending || !reportEditor)return;
+    if(await reportAction.run(()=>api.patch("/works/"+encodeURIComponent(id)+"/reports/"+encodeURIComponent(reportEditor.id),{text})))setReportEditor(null);
+  };
+  const confirmDeletion=async()=>{
+    if(reportAction.pending || !confirmation)return;
+    const report=confirmation.kind==="report";
+    const url="/works/"+encodeURIComponent(id)+(report ? "/reports/"+encodeURIComponent(confirmation.reportId) : "");
+    if(await reportAction.run(()=>api.delete(url))) {
+      setConfirmation(null);
+      if(!report)navigate("/dashboard?projectId="+encodeURIComponent(work.projectId));
+    }
+  };
   const perform=async task=>{
     setBusy(true);
     try {
@@ -266,8 +283,10 @@ function WorkPage() {
   };
   const handleDoneClick=async()=>{
     if(!work || busy)return;
-    if(work.status==="done"){navigate("/dashboard");return;}
-    if(await perform(()=>api.patch("/works/"+encodeURIComponent(id)+"/status",{status:"done"})))navigate("/dashboard");
+    const status=work.status==="done" ? "in_progress" : "done";
+    if(await perform(()=>api.patch("/works/"+encodeURIComponent(id)+"/status",{status}))) {
+      if(status==="done")navigate("/dashboard?projectId="+encodeURIComponent(work.projectId));
+    }
   };
   const handleEditOpen=()=>setEditOpen(true);
   const handleEditClose=()=>{if(busy)return;setEditOpen(false);setSearchText("");};
@@ -286,9 +305,9 @@ function WorkPage() {
     if(await perform(()=>api.put("/works/"+encodeURIComponent(id)+"/assignees",{userIds})))setSearchText("");
   };
   const handleMemberRemove=userId=>perform(()=>api.put("/works/"+encodeURIComponent(id)+"/assignees",{userIds:members.filter(user=>user.id!==userId).map(user=>user.id)}));
-  const handleDelete=async()=>{
-    if(!work?.canEdit || !window.confirm("این کار، گزارش‌ها و فایل‌های آن حذف می‌شوند. ادامه می‌دهید؟"))return;
-    if(await perform(()=>api.delete("/works/"+encodeURIComponent(id))))navigate("/dashboard");
+  const handleDelete=()=>{
+    if(!work?.canEdit)return;
+    reportAction.clearError();setConfirmation({kind:"work"});
   };
 
   /* =================== Rows from server data (NEW) =================== */
@@ -365,9 +384,14 @@ function WorkPage() {
         styles={`html,body{margin:0;height:100%;overflow:hidden}`}
       />
 
+      {reportEditor && <TextDialog key={reportEditor.id} open title="ویرایش گزارش" label="متن گزارش کار" multiline initial={reportEditor.text}
+        onClose={()=>setReportEditor(null)} onSave={saveReport} pending={reportAction.pending} error={reportAction.error}/>}
+      <ConfirmDialog open={!!confirmation} title={confirmation?.kind==="report" ? "حذف گزارش" : "حذف کار"}
+        description={confirmation?.kind==="report" ? "این گزارش حذف شود؟" : "این کار، گزارش‌ها و فایل‌های آن حذف می‌شوند. ادامه می‌دهید؟"}
+        onClose={()=>setConfirmation(null)} onConfirm={confirmDeletion} pending={reportAction.pending} error={reportAction.error}/>
       {/* Busy overlay */}
       <Backdrop
-        open={busy}
+        open={busy || reportAction.pending}
         sx={{ zIndex: theme.zIndex.modal + 1, color: "#fff" }}
       >
         <CircularProgress color="inherit" />
@@ -837,9 +861,9 @@ function WorkPage() {
               </Stack>
 
               <Stack spacing={2} sx={{ p: 1.5, pt: 1 }}>
-                {reports.map(({ user, text, date }, i) => (
+                {reports.map(({ id:reportId, user, text, date, canEdit }) => (
                   <Box
-                    key={i}
+                    key={reportId}
                     sx={{
                       display: "flex",
                       flexDirection: "row-reverse",
@@ -892,6 +916,12 @@ function WorkPage() {
                       <Typography variant="caption" color="text.secondary">
                         {date}
                       </Typography>
+                      {canEdit && <Stack direction="row" justifyContent="flex-end" sx={{mt:0.5}}>
+                        <Tooltip title="ویرایش گزارش"><IconButton size="small" aria-label={"ویرایش گزارش: "+text} disabled={busy || reportAction.pending}
+                          onClick={()=>{reportAction.clearError();setReportEditor({id:reportId,text});}} sx={{color:ORANGE}}><EditRoundedIcon fontSize="small"/></IconButton></Tooltip>
+                        <Tooltip title="حذف گزارش"><IconButton size="small" aria-label={"حذف گزارش: "+text} disabled={busy || reportAction.pending}
+                          onClick={()=>{reportAction.clearError();setConfirmation({kind:"report",reportId});}} sx={{color:ORANGE}}><DeleteOutlineRoundedIcon fontSize="small"/></IconButton></Tooltip>
+                      </Stack>}
                     </Box>
                   </Box>
                 ))}
@@ -915,17 +945,20 @@ function WorkPage() {
           >
             <Button
               variant="contained"
+              startIcon={work?.status === "done" ? <RefreshRoundedIcon/> : undefined}
               onClick={handleDoneClick}
               disabled={busy || !work?.canChangeStatus}
               sx={{
                 width: 230,
                 height: 44,
+                gap: 0.75,
+                "& .MuiButton-startIcon": { margin: 0 },
                 bgcolor: ORANGE,
                 borderRadius: 2,
                 "&:hover": { bgcolor: "#ff530c" },
               }}
             >
-              {work?.status === "done" ? "تمام شده" : "انجام کار"}
+              {work?.status === "done" ? "بازگشت به در حال انجام" : "انجام کار"}
             </Button>
           </Box>
         </Paper>

@@ -76,7 +76,7 @@ test('original layouts keep project, work, reports, members and status connected
  await page.screenshot({path:'test-results/original-dashboard.png'});
  await page.getByRole('button',{name:'کار ویرایش‌شده',exact:true}).click();
  await page.getByRole('button',{name:'مشاهده کامل کار',exact:true}).click();
- await expect(page.getByRole('button',{name:'تمام شده',exact:true})).toBeVisible();
+ await expect(page.getByRole('button',{name:'بازگشت به در حال انجام',exact:true})).toBeVisible();
  expect(errors).toEqual([]);await context.dispose();
 });
 test('dashboard creates work for root and nested projects and starts a fresh draft',async({page})=>{

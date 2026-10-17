@@ -16,7 +16,7 @@
  ********************************************************************/
 
 // Import React and the hooks used throughout this component.
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 // Import Material UI components for layout, inputs, feedback, and actions.
 import {
   Box,
@@ -45,6 +45,8 @@ import {useSaveWork} from "../hooks/useOriginalWorks";
 import {useWork} from "../hooks/useWorks";
 import {useAuth} from "../auth/AuthContext";
 import {errorMessage} from "../lib/api";
+import {readSessionDraft,useSessionDraft} from "../hooks/useSessionDraft";
+import {readWorkDraftFiles,setWorkDraftFile,clearWorkDraftFiles} from "../lib/workDraftFiles";
 // Router hooks for navigation and reading state passed from other pages.
 import { useNavigate, useLocation,useParams } from "react-router-dom";
 
@@ -325,9 +327,8 @@ const FileNameSpan = styled("span")({
 });
 
 // File upload pill component; forwards the selected File to parent via onFile.
-const FileUploadPill = ({ label, onFile }) => {
-  // Local filename for visual feedback.
-  const [fileName, setFileName] = useState("");
+const FileUploadPill = ({ label, onFile, file }) => {
+  const fileName = file?.name || "";
   // Ref to reset the native input so the same file can be re-picked.
   const inputRef = useRef(null);
 
@@ -348,7 +349,6 @@ const FileUploadPill = ({ label, onFile }) => {
           // Safely read the first selected file (or null).
           const file = e.target.files?.[0] || null;
           // Update visual filename.
-          setFileName(file ? file.name : "");
           // Notify parent about the selected file.
           onFile?.(file);
           // Reset the input value so the same file selection can re-trigger onChange.
@@ -416,128 +416,62 @@ const floors = [
 /* ============================== Main ============================== */
 // Main page component managing form state, persistence, navigation and submit.
 export default function WorkCreationPage() {
-  const {id}=useParams(),auth=useAuth(),initialWork=useWork(id),initialized=useRef(null);
-  const navigate = useNavigate();
-  const location = useLocation();
-  const dashboardEntry = useRef(location.state?.startNewWork ? location.state : null);
-  const DRAFT_KEY=DRAFT_PREFIX+auth.user.id;
+  const {id}=useParams(),{user}=useAuth();
+  return <WorkForm key={user.id+":"+(id || "new")} id={id}/>;
+}
+
+function WorkForm({id}) {
+  const auth=useAuth(),initialWork=useWork(id),initialized=useRef(false);
+  const navigate=useNavigate(),location=useLocation();
+  const DRAFT_KEY=(id ? "editWorkDraft:"+id+":" : DRAFT_PREFIX)+auth.user.id;
+  const fresh=!!location.state?.startNewWork;
+  const hadSavedDraft=useRef(!!readSessionDraft(DRAFT_KEY));
+  const [draft,updateDraft,removeDraft]=useSessionDraft(DRAFT_KEY,{
+    title:"",project:fresh ? location.state.selectedPath || "" : "",floor:"",summary:"",prereq:"",
+    selectedProjectId:fresh ? location.state.selectedId || null : null,
+    selectedProjectPath:fresh ? location.state.selectedPath || "" : "",
+  },fresh);
+  const {title,project,floor,summary,prereq,selectedProjectId,selectedProjectPath}=draft;
+  const setTitle=title=>updateDraft({title});
+  const setProject=project=>updateDraft({project});
+  const setFloor=floor=>updateDraft({floor});
+  const setSummary=summary=>updateDraft({summary});
+  const setPrereq=prereq=>updateDraft({prereq});
+  const setSelectedProjectId=selectedProjectId=>updateDraft({selectedProjectId});
+  const setSelectedProjectPath=selectedProjectPath=>updateDraft({selectedProjectPath});
+  const [files,setFiles]=useState(()=>{
+    if(fresh)clearWorkDraftFiles(DRAFT_KEY);
+    return readWorkDraftFiles(DRAFT_KEY);
+  });
+  const cover=files.cover,attachment=files.attachment;
+  const setFile=(kind,file)=>{
+    setWorkDraftFile(DRAFT_KEY,kind,file);
+    setFiles(readWorkDraftFiles(DRAFT_KEY));
+  };
+  const [uploadsKey,setUploadsKey]=useState(0);
   useEffect(()=>{
+    if(!id || !initialWork.data || initialized.current)return;
+    initialized.current=true;
+    if(hadSavedDraft.current)return;
     const work=initialWork.data;
-    if(!id || !work || initialized.current===id)return;
-    initialized.current=id;
-    setTitle(work.title);setProject(work.project);setFloor(floors[work.floorNum-1]);
-    setSummary(work.summary);setPrereq(work.prerequisite);
-    setSelectedProjectId(work.projectId);setSelectedProjectPath(work.project);
-  },[id,initialWork.data]);
-  // Text inputs composing the work form.
-  const [title, setTitle] = useState("");
-  const [project, setProject] = useState("");
-  const [floor, setFloor] = useState("");
-  const [summary, setSummary] = useState("");
-  const [prereq, setPrereq] = useState("");
-
-  // File inputs: File objects cannot be persisted in sessionStorage.
-  const [cover, setCover] = useState(null);
-  const [attachment, setAttachment] = useState(null);
-  const [uploadsKey, setUploadsKey] = useState(0); // Forces FileUploadPill to remount and clear label
-
-  // Selected project (id + breadcrumb-like path) displayed in the Select pill.
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
-  const [selectedProjectPath, setSelectedProjectPath] = useState("");
-
-  /* ---------- RESTORE: load draft once on mount ---------- */
-  useEffect(() => {
-    try {
-      // Read serialized draft from sessionStorage (per-tab).
-      if(id)return;
-      if(dashboardEntry.current) {
-        const selection=dashboardEntry.current;
-        const freshDraft={project:selection.selectedPath || "",selectedProjectId:selection.selectedId || null,
-          selectedProjectPath:selection.selectedPath || ""};
-        setProject(freshDraft.project);setSelectedProjectId(freshDraft.selectedProjectId);
-        setSelectedProjectPath(freshDraft.selectedProjectPath);
-        sessionStorage.setItem(DRAFT_KEY,JSON.stringify(freshDraft));
-        return;
-      }
-      const raw = sessionStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw);
-      // Restore simple string fields if present.
-      if (typeof draft.title === "string") setTitle(draft.title);
-      if (typeof draft.project === "string") setProject(draft.project);
-      if (typeof draft.floor === "string") setFloor(draft.floor);
-      if (typeof draft.summary === "string") setSummary(draft.summary);
-      if (typeof draft.prereq === "string") setPrereq(draft.prereq);
-      // Restore selection metadata for the read-only project pill.
-      if (draft.selectedProjectId != null)
-        setSelectedProjectId(draft.selectedProjectId);
-      if (typeof draft.selectedProjectPath === "string")
-        setSelectedProjectPath(draft.selectedProjectPath);
-      // Files are intentionally not restored for security/UX reasons.
-    } catch {
-      // Ignore malformed or oversized storage errors.
-    }
-  }, [DRAFT_KEY,id]);
-
-  /* ---------- ROUTER STATE SYNC (when coming back from /select-project) ---------- */
-  useEffect(() => {
+    updateDraft({title:work.title,project:work.project,floor:floors[work.floorNum-1],
+      summary:work.summary,prereq:work.prerequisite,
+      selectedProjectId:work.projectId,selectedProjectPath:work.project});
+  },[id,initialWork.data,updateDraft]);
+  useEffect(()=>{
     if(id)return;
-    // Read state pushed by the /select-project page.
-    const s = location.state;
-    if (s && (s.startNewWork || s.selectedId || s.selectedPath)) {
-      // Update local selection states.
-      setSelectedProjectId(s.selectedId ?? null);
-      setSelectedProjectPath(s.selectedPath ?? "");
-      setProject(s.selectedPath ?? "");
-      try {
-        const draft=JSON.parse(sessionStorage.getItem(DRAFT_KEY) || "{}");
-        sessionStorage.setItem(DRAFT_KEY,JSON.stringify({...draft,project:s.selectedPath || "",
-          selectedProjectId:s.selectedId || null,selectedProjectPath:s.selectedPath || ""}));
-      }catch{ /* Keep the current selection even when draft storage is unavailable. */ }
-      // Clear router state to avoid re-applying on refresh.
-      navigate(".", { replace: true, state: {} });
+    const state=location.state;
+    if(state && (state.startNewWork || state.selectedId || state.selectedPath)) {
+      updateDraft({project:state.selectedPath || "",selectedProjectId:state.selectedId || null,
+        selectedProjectPath:state.selectedPath || ""});
+      navigate(".",{replace:true,state:{}});
     }
-  }, [location.state, navigate, DRAFT_KEY, id]);
-
-  // Mutation hook used to submit the work creation request.
-  const { mutate: addWork, isPending } = useSaveWork(id);
-
-  /* ---------- HELPERS: persist & clear draft ---------- */
-  // Serialize current form state into sessionStorage for later restoration.
-  const persistDraft = useCallback(() => {
-    try {
-      sessionStorage.setItem(
-        DRAFT_KEY,
-        JSON.stringify({
-          title,
-          project,
-          floor,
-          summary,
-          prereq,
-          selectedProjectId,
-          selectedProjectPath,
-        })
-      );
-    } catch {
-      // Storage disabled or quota exceeded — fail silently.
-    }
-  }, [
-    title,
-    project,
-    floor,
-    summary,
-    prereq,
-    selectedProjectId,
-    selectedProjectPath,
-    DRAFT_KEY,
-  ]);
-
-  // Remove the persisted draft (used on reset and after successful submit).
-  const clearDraft = () => {
-    dashboardEntry.current = null;
-    try {
-      sessionStorage.removeItem(DRAFT_KEY);
-    } catch { /* The form still resets if browser storage is unavailable. */ }
+  },[id,location.state,navigate,updateDraft]);
+  const {mutate:addWork,isPending}=useSaveWork(id);
+  const persistDraft=()=>updateDraft({});
+  const clearDraft=()=>{
+    removeDraft();
+    clearWorkDraftFiles(DRAFT_KEY);
   };
 
   /* ---------- SUBMIT ---------- */
@@ -592,8 +526,7 @@ export default function WorkCreationPage() {
     setSummary("");
     setPrereq("");
     // Clear files and re-mount upload pills to clear their visible labels.
-    setCover(null);
-    setAttachment(null);
+    setFiles({});
     setSelectedProjectId(null);
     setSelectedProjectPath("");
     setUploadsKey((k) => k + 1);
@@ -602,7 +535,7 @@ export default function WorkCreationPage() {
   };
 
   const handleCancel = () => {
-    if(id){navigate("/works/"+encodeURIComponent(id));return;}
+    if(id){clearDraft();navigate("/works/"+encodeURIComponent(id));return;}
     const destination=selectedProjectId ? "/dashboard?projectId="+encodeURIComponent(selectedProjectId) : "/dashboard";
     resetForm();navigate(destination, { replace: true, state: null });
   };
@@ -610,7 +543,7 @@ export default function WorkCreationPage() {
   /* ---------- LIGHTWEIGHT LOCK ---------- */
   /* ---------- COMPLETENESS ---------- */
   // Minimal completeness check: all required text fields must be non-empty.
-  const isFormComplete = [title, project, floor, summary, prereq].every((v) =>
+  const isFormComplete = [title, project, floor, summary].every((v) =>
     typeof v === "string" ? v.trim().length > 0 : !!v
   );
 
@@ -731,19 +664,20 @@ export default function WorkCreationPage() {
               size="tall"
               value={prereq}
               onChange={(e) => setPrereq(e.target.value)}
-              required
             />
 
             {/* File uploads (keys ensure visual reset on form reset) */}
             <FileUploadPill
               key={`cover-${uploadsKey}`}
               label="تصویر شاخص کار"
-              onFile={setCover}
+              file={cover}
+              onFile={file=>setFile("cover",file)}
             />
             <FileUploadPill
               key={`att-${uploadsKey}`}
               label="فایل پیوست"
-              onFile={setAttachment}
+              file={attachment}
+              onFile={file=>setFile("attachment",file)}
             />
           </Stack>
 

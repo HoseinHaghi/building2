@@ -16,20 +16,31 @@ export function PageTitle({title,description,actions}) {
     <Box><Typography variant="h5" component="h1">{title}</Typography>{description && <Typography color="text.secondary" sx={{mt:1}}>{description}</Typography>}</Box>{actions}
   </Stack>;
 }
-export function ConfirmDialog({open,title,description,onClose,onConfirm,pending,error}) {
-  return <Dialog open={open} onClose={pending ? undefined : onClose} fullWidth maxWidth="xs">
+const dialogPaper = {dir:'rtl',sx:{borderRadius:3,fontFamily:'IRANYekanWeb',p:1,
+  '& .MuiTypography-root,& .MuiInputBase-root,& .MuiFormLabel-root,& .MuiAlert-root':{fontFamily:'inherit'},
+  '& .MuiDialogTitle-root':{textAlign:'center',fontSize:22,fontWeight:500},
+  '& .MuiButton-root':{fontFamily:'inherit',borderRadius:2},
+  '& .MuiButton-contained':{bgcolor:'#ff7043','&:hover':{bgcolor:'#e65c35'}},
+  '& .MuiButton-text':{color:'#757575'}}};
+export function ConfirmDialog({open,title,description,onClose,onConfirm,pending,error,confirmLabel='حذف'}) {
+  return <Dialog open={open} onClose={pending ? undefined : onClose} fullWidth maxWidth="xs" PaperProps={dialogPaper}>
     <DialogTitle>{title}</DialogTitle><DialogContent><Typography>{description}</Typography>{error && <Alert severity="error" sx={{mt:2}}>{error}</Alert>}</DialogContent>
-    <DialogActions><Button onClick={onClose} disabled={pending}>انصراف</Button><Button color="error" variant="contained" onClick={onConfirm} disabled={pending}>حذف</Button></DialogActions>
+    <DialogActions disableSpacing sx={{gap:1}}><Button onClick={onClose} disabled={pending}>انصراف</Button><Button variant="contained" onClick={onConfirm} disabled={pending}>{confirmLabel}</Button></DialogActions>
   </Dialog>;
 }
-export function TextDialog({open,title,initial='',onClose,onSave,pending,error,label='نام'}) {
+export function TextDialog({open,title,initial='',onClose,onSave,pending,error,label='نام',multiline=false}) {
   const [value,setValue]=useState(initial);
   // This component is mounted with a key whenever a new edit starts.
-  return <Dialog open={open} onClose={pending ? undefined : onClose} fullWidth maxWidth="sm">
-    <Box component="form" onSubmit={e=>{e.preventDefault();onSave(value);}}>
-      <DialogTitle>{title}</DialogTitle><DialogContent><TextField autoFocus fullWidth required label={label} value={value} multiline minRows={2} onChange={e=>setValue(e.target.value)} sx={{mt:1}}/>
+  return <Dialog open={open} onClose={pending ? undefined : onClose} fullWidth maxWidth="xs" PaperProps={dialogPaper}>
+    <Box component="form" onSubmit={e=>{e.preventDefault();if(!pending && value.trim())onSave(value.trim());}}>
+      <DialogTitle>{title}</DialogTitle><DialogContent><TextField autoFocus fullWidth required disabled={pending} label={label} value={value} multiline={multiline} minRows={multiline ? 4 : undefined} onChange={e=>setValue(e.target.value)}
+        InputLabelProps={{shrink:true}} inputProps={{dir:'rtl','aria-label':label}}
+        sx={{mt:1,
+          '& .MuiOutlinedInput-root':{borderRadius:3,bgcolor:'#f5f5f5','& fieldset,&:hover fieldset,&.Mui-focused fieldset':{border:0},'&.Mui-focused':{boxShadow:'0 0 0 1px #ff7043'}},
+          '& .MuiInputLabel-root':{right:20,left:'auto',transformOrigin:'top right','&.MuiInputLabel-shrink':{transform:'translate(0,-9px) scale(0.75)'}},
+          '& label.Mui-focused':{color:'#ff7043'}}}/>
         {error && <Alert severity="error" sx={{mt:2}}>{error}</Alert>}</DialogContent>
-      <DialogActions><Button onClick={onClose} disabled={pending}>انصراف</Button><Button type="submit" variant="contained" disabled={pending || !value.trim()}>ذخیره</Button></DialogActions>
+      <DialogActions disableSpacing sx={{gap:1}}><Button onClick={onClose} disabled={pending}>انصراف</Button><Button type="submit" variant="contained" disabled={pending || !value.trim()}>ذخیره</Button></DialogActions>
     </Box>
   </Dialog>;
 }

@@ -34,6 +34,9 @@ import {
   Backdrop,
   CircularProgress,
   Tooltip,
+  Menu,
+  MenuItem,
+  ListItemIcon,
 } from "@mui/material";
 import MenuRoundedIcon from "@mui/icons-material/esm/MenuRounded.js";
 import CloseRoundedIcon from "@mui/icons-material/esm/CloseRounded.js";
@@ -51,6 +54,9 @@ import {useOriginalWorks as useWorks} from "../hooks/useOriginalWorks";
 import {useAction} from "../hooks/useAction";
 import {useAuth} from "../auth/AuthContext";
 import api,{fileUrl} from "../lib/api";
+import {ConfirmDialog,TextDialog} from "./shared";
+import MoreHorizRoundedIcon from "@mui/icons-material/esm/MoreHorizRounded.js";
+import LogoutRoundedIcon from "@mui/icons-material/esm/LogoutRounded.js";
 
 /* ========== Layout constants ========== */
 const CLOSED_WIDTH = 64; // sidebar collapsed width
@@ -187,6 +193,7 @@ const Pill = ({
   Icon,
   onClick,
   selected,
+  actions,
 }) => (
   <Box
     dir="rtl"
@@ -218,6 +225,7 @@ const Pill = ({
     >
       {label}
     </Typography>
+    {actions}
     {hasChildren &&
       (expanded ? (
         <ExpandLessRoundedIcon
@@ -841,6 +849,8 @@ const TasksPage = ({projectId,floorNum}) => {
 export default function Dashboard() {
   const [params]=useSearchParams(),auth=useAuth(),action=useAction();
   const [allFloor,setAllFloor]=useState(null),[selectedWork,setSelectedWork]=useState(null);
+  const [deleteWorkOpen,setDeleteWorkOpen]=useState(false);
+  const [projectMenu,setProjectMenu]=useState(null),[projectEditor,setProjectEditor]=useState(null),[projectDeletion,setProjectDeletion]=useState(null);
   /* sidebar state */
   const [openSidebar, setOpenSidebar] = useState(false);
   const [expandedIds, setExpandedIds] = useState([]);
@@ -918,6 +928,10 @@ export default function Dashboard() {
           label={node.label}
           Icon={node.icon}
           selected={selected}
+          actions={selected && node.canManage ? <Tooltip title="مدیریت پروژه"><IconButton
+            size="small" aria-label={"مدیریت پروژه "+node.label}
+            onClick={event=>{event.stopPropagation();action.clearError();setProjectMenu({anchorEl:event.currentTarget,project:node});}}
+            sx={{color:"inherit",p:0.25}}><MoreHorizRoundedIcon fontSize="small"/></IconButton></Tooltip> : null}
           onClick={() => {
             setAllFloor(null);
             setSelectedId(node.id);
@@ -954,15 +968,50 @@ export default function Dashboard() {
     if(!selectedWork)return;
     setDialogOpen(false);navigate("/works/"+encodeURIComponent(selectedWork.id),{state:{from:"board"}});
   };
-  const handleDeleteCircle=async()=>{
-    if(!selectedWork?.canEdit)return;
-    if(await action.run(()=>api.delete("/works/"+encodeURIComponent(selectedWork.id))))setDialogOpen(false);
-    else window.alert("حذف کار انجام نشد.");
+  const handleDeleteCircle=()=>{
+    if(!selectedWork?.canEdit || action.pending)return;
+    action.clearError();setDeleteWorkOpen(true);
+  };
+  const confirmDeleteWork=async()=>{
+    if(action.pending || !selectedWork?.canEdit)return;
+    if(await action.run(()=>api.delete("/works/"+encodeURIComponent(selectedWork.id)))) {
+      setDeleteWorkOpen(false);setDialogOpen(false);
+    }
+  };
+  const renameProject=async name=>{
+    if(action.pending || !projectEditor)return;
+    if(await action.run(()=>api.patch("/projects/"+encodeURIComponent(projectEditor.id),{name})))setProjectEditor(null);
+  };
+  const deleteProject=async()=>{
+    if(action.pending || !projectDeletion)return;
+    if(await action.run(()=>api.delete("/projects/"+encodeURIComponent(projectDeletion.id)))) {
+      if(selectedId===projectDeletion.id){setSelectedId(null);setSelectedLevel(null);navigate("/dashboard",{replace:true});}
+      setProjectDeletion(null);
+    }
+  };
+  const logout=async()=>{
+    if(action.pending)return;
+    if(await action.run(()=>auth.logout()))navigate("/login",{replace:true});
   };
 
   /* ===== Render ===== */
   return (
     <>
+      <ConfirmDialog open={deleteWorkOpen} title="حذف کار" description="این کار، گزارش‌ها و فایل‌های آن حذف می‌شوند. ادامه می‌دهید؟"
+        pending={action.pending} error={action.error} onClose={()=>{setDeleteWorkOpen(false);action.clearError();}} onConfirm={confirmDeleteWork}/>
+      <Menu anchorEl={projectMenu?.anchorEl || null} open={!!projectMenu} onClose={()=>setProjectMenu(null)}
+        PaperProps={{dir:"rtl",sx:{borderRadius:2,fontFamily:"IRANYekanWeb",'& .MuiMenuItem-root':{fontFamily:'inherit'}}}}>
+        <MenuItem onClick={()=>{action.clearError();setProjectEditor(projectMenu.project);setProjectMenu(null);}}>
+          <ListItemIcon><EditRoundedIcon sx={{color:"#ff7043"}} fontSize="small"/></ListItemIcon>تغییر نام پروژه
+        </MenuItem>
+        <MenuItem onClick={()=>{action.clearError();setProjectDeletion(projectMenu.project);setProjectMenu(null);}}>
+          <ListItemIcon><DeleteOutlineRoundedIcon sx={{color:"#ff7043"}} fontSize="small"/></ListItemIcon>حذف پروژه
+        </MenuItem>
+      </Menu>
+      {projectEditor && <TextDialog key={projectEditor.id} open title="تغییر نام پروژه" label="نام پروژه" initial={projectEditor.name || projectEditor.label}
+        onClose={()=>{setProjectEditor(null);action.clearError();}} onSave={renameProject} pending={action.pending} error={action.error}/>}
+      <ConfirmDialog open={!!projectDeletion} title="حذف پروژه" description={"پروژه «"+(projectDeletion?.name || projectDeletion?.label || "")+"» حذف شود؟ فقط پروژه‌های بدون کار و زیرپروژه قابل حذف‌اند."}
+        onClose={()=>{setProjectDeletion(null);action.clearError();}} onConfirm={deleteProject} pending={action.pending} error={action.error}/>
       {/* Dialog loading indicator */}
       <Backdrop open={dialogBtnDisabled || action.pending || (showBoard && boardQuery.isLoading)} sx={{ zIndex: 2000, color: "#fff" }}>
         <CircularProgress color="inherit" />
@@ -1180,6 +1229,10 @@ export default function Dashboard() {
             />
           </Box>
 
+          <Box sx={{px:openSidebar ? 2 : 0,pb:1,display:"flex",justifyContent:"center"}}>
+            <SidebarAction expanded={openSidebar} label="خروج از حساب" Icon={LogoutRoundedIcon} onClick={logout} disabled={action.pending}/>
+          </Box>
+          {action.error && !deleteWorkOpen && !projectEditor && !projectDeletion && <Typography role="alert" color="error" sx={{px:1,fontSize:12,textAlign:"center"}}>{action.error}</Typography>}
           {/* profile footer */}
           <Box
             sx={{
@@ -1252,6 +1305,11 @@ export default function Dashboard() {
               elevation={4}
               sx={{
                 width: 300,
+                maxWidth: "calc(100vw - 32px)",
+                maxHeight: "calc(100dvh - 32px)",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
                 borderRadius: 2,
                 px: 3,
                 py: 2,
@@ -1290,6 +1348,8 @@ export default function Dashboard() {
                 </IconButton>
                 <IconButton
                   size="small"
+                  aria-label="حذف کار"
+                  disabled={!selectedWork?.canEdit || action.pending}
                   onClick={handleDeleteCircle}
                   sx={{ color: "#ff7043" }}
                 >
@@ -1300,6 +1360,7 @@ export default function Dashboard() {
               <Typography
                 sx={{
                   mt: 4,
+                  flexShrink: 0,
                   fontSize: 18,
                   fontWeight: 600,
                   fontFamily: "IRANYekanWeb",
@@ -1308,8 +1369,20 @@ export default function Dashboard() {
                 {dialogContent.title}
               </Typography>
               <Typography
+                component="div"
+                role="region"
+                aria-label="توضیحات کار"
+                tabIndex={0}
                 sx={{
                   mt: 1.5,
+                  minHeight: 0,
+                  maxHeight: "min(280px, 40dvh)",
+                  overflowY: "auto",
+                  overflowX: "hidden",
+                  overflowWrap: "anywhere",
+                  whiteSpace: "pre-wrap",
+                  overscrollBehavior: "contain",
+                  scrollbarWidth: "thin",
                   fontSize: 14,
                   lineHeight: 2,
                   fontFamily: "IRANYekanWeb",
@@ -1326,6 +1399,7 @@ export default function Dashboard() {
                 onClick={handleDialogBtnClick}
                 sx={{
                   mt: 3,
+                  flexShrink: 0,
                   bgcolor: "#ff7043",
                   "&:hover": { bgcolor: "#ff530c" },
                   fontFamily: "IRANYekanWeb",
