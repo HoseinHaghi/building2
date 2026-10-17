@@ -83,13 +83,15 @@ const Root = styled(Box)({
 // Card container to center content and constrain size.
 const Card = styled(Paper)({
   width: 410,
-  maxHeight: "94vh",
+  maxWidth: "calc(100vw - 24px)",
+  maxHeight: "94dvh",
   borderRadius: 24,
-  padding: "8px 36px 40px",
+  padding: "8px 36px 26px",
   boxSizing: "border-box",
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
+  overflow: "hidden",
 });
 
 // Shared label position when MUI label is in "shrink" state (RTL-friendly).
@@ -103,6 +105,7 @@ const shrinkLabelCss = {
 // Base pill-like TextField styling: rounded, filled, RTL text, custom label.
 const BaseTF = styled(TextField)({
   width: fieldWidth,
+  maxWidth: "100%",
   "& .MuiOutlinedInput-root": {
     borderRadius: 24,
     backgroundColor: pillBg,
@@ -180,6 +183,7 @@ function SelectPillLg({
       required={required}
       sx={{
         width: fieldWidth,
+        maxWidth: "100%",
         backgroundColor: selectBg,
         borderRadius: "40px",
         direction: "rtl",
@@ -298,6 +302,7 @@ function SelectPillLg({
 // Styled button acting as a pill-shaped file input trigger.
 const UploadPillStyled = styled(Button)({
   width: fieldWidth,
+  maxWidth: "100%",
   height: pillHeightLg,
   minHeight: pillHeightLg,
   borderRadius: 24,
@@ -366,7 +371,7 @@ const FileUploadPill = ({ label, onFile, file, disabled }) => {
 // Base button style used by both primary (Create) and secondary (Cancel) buttons.
 const BtnBase = styled(Button)({
   height: actionBtnHeight,
-  minWidth: 140,
+  minWidth: 0,
   borderRadius: 6,
   fontFamily,
   fontSize: 16,
@@ -564,10 +569,13 @@ function WorkForm({id}) {
           transform: "translate(-50%, -50%)",
         }}
       >
-        <Card elevation={3}>
+        <Card elevation={3} component="section" aria-labelledby="work-form-title">
           {/* Page title */}
           <Typography
+            component="h1"
+            id="work-form-title"
             sx={{
+              flexShrink: 0,
               fontFamily,
               fontSize: 24,
               fontWeight: 400,
@@ -578,8 +586,11 @@ function WorkForm({id}) {
             {id ? "ویرایش کار" : "ایجاد کار جدید"}
           </Typography>
 
-          {/* Form stack with narrow spacing; aligned center */}
-          <Stack spacing={0.6} alignItems="center">
+          {/* Keep the title and actions outside the scrollable form fields. */}
+          <Box role="region" aria-label="اطلاعات کار" tabIndex={0}
+            sx={{width:"100%",minHeight:0,overflowY:"auto",overflowX:"hidden",pt:1.5,pb:0.5,
+              overscrollBehavior:"contain",scrollbarWidth:"thin",scrollbarColor:"#c7c7c7 transparent",scrollbarGutter:"stable both-edges"}}>
+          <Stack spacing={1.25} alignItems="center" sx={{'& > *':{flexShrink:0}}}>
             {/* Title input (required) */}
             <TextFieldPill
               label="عنوان کار"
@@ -589,7 +600,7 @@ function WorkForm({id}) {
             />
 
             {/* Project selector (display-only). We persist draft BEFORE navigating away. */}
-            <Box sx={{ position: "relative", width: "100%" }}>
+            <Box sx={{ position: "relative", width: fieldWidth, maxWidth: "100%" }}>
               {/* Read-only Select showing the selected project path */}
               <SelectPillLg
                 label="انتخاب پروژه"
@@ -683,13 +694,18 @@ function WorkForm({id}) {
             <Typography sx={{fontFamily,fontSize:10,color:"#757575",lineHeight:1.4}}>حداکثر هر فایل ۱۰ مگابایت؛ تصویر: PNG، JPEG یا WebP.</Typography>
             {fileDraft.error && <Typography role="alert" color="error" sx={{fontFamily,fontSize:12,maxHeight:48,overflowY:"auto"}}>{fileDraft.error}</Typography>}
           </Stack>
+          </Box>
 
           {/* Action buttons row: Create (primary) and Cancel (secondary) */}
           <Stack
+            role="group"
+            aria-label="عملیات کار"
             direction="row"
             sx={{
-              mt: 1,
+              flexShrink: 0,
+              mt: 1.75,
               width: fieldWidth,
+              maxWidth: "100%",
               justifyContent: "center",
               gap: "10px",
             }}
