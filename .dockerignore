@@ -1,0 +1,16 @@
+node_modules
+server/node_modules
+dist
+.git
+.env*
+server/.env*
+server/storage
+server/data.json
+server/uploads
+server/test
+test-results
+playwright-report
+e2e
+reference
+backups
+*.log
