@@ -54,7 +54,7 @@ import {useOriginalWorks as useWorks} from "../hooks/useOriginalWorks";
 import {useAction} from "../hooks/useAction";
 import {useAuth} from "../auth/AuthContext";
 import api,{fileUrl} from "../lib/api";
-import {ConfirmDialog,TextDialog} from "./shared";
+import {ConfirmDialog,TextDialog,QueryFeedback} from "./shared";
 import MoreHorizRoundedIcon from "@mui/icons-material/esm/MoreHorizRounded.js";
 import LogoutRoundedIcon from "@mui/icons-material/esm/LogoutRounded.js";
 
@@ -765,12 +765,14 @@ const TasksPage = ({projectId,floorNum}) => {
     data: inProgress = [],
     isLoading: loadingIP,
     error: errorIP,
+    refetch: retryIP,
   } = useWorks({status:"in_progress",mine:projectId ? undefined : "true",projectId,floorNum});
 
   const {
     data: done = [],
     isLoading: loadingDone,
     error: errorDone,
+    refetch: retryDone,
   } = useWorks({status:"done",mine:projectId ? undefined : "true",projectId,floorNum});
 
   // ⬅️ این دو خط: تبدیل رکوردهای سرور به شکل موردنیاز کارت‌ها
@@ -816,9 +818,7 @@ const TasksPage = ({projectId,floorNum}) => {
           justifyContent: "center",
         }}
       >
-        <Typography color="error" sx={{ fontFamily: "IRANYekanWeb" }}>
-          خطا در دریافت لیست کارها
-        </Typography>
+        <QueryFeedback query={{isError:true,error:errorIP || errorDone,refetch:()=>Promise.all([retryIP(),retryDone()])}} label="دریافت فهرست کارها انجام نشد."/>
       </Paper>
     );
   }
@@ -847,15 +847,31 @@ const TasksPage = ({projectId,floorNum}) => {
  * Dashboard – top‑level exported component
  * =============================================================== */
 export default function Dashboard() {
-  const [params]=useSearchParams(),auth=useAuth(),action=useAction();
-  const [allFloor,setAllFloor]=useState(null),[selectedWork,setSelectedWork]=useState(null);
+  const [params,setParams]=useSearchParams(),auth=useAuth(),action=useAction();
+  const [selectedWork,setSelectedWork]=useState(null);
+  const floor=Number(params.get("floor"));
+  const allFloor=Number.isInteger(floor) && floor>=1 && floor<=7 ? floor : null;
+  const selectedId=params.get("projectId") || (params.get("view")==="tasks" ? "tasks" : params.get("view")==="projects" ? "projects" : null);
+  const selectedLevel=selectedId && !["tasks","projects"].includes(selectedId) ? 1 : null;
+  const selectView=id=>{
+    if(id===selectedId && allFloor===null)return;
+    setParams(previous=>{
+      const next=new URLSearchParams(previous);next.delete("floor");
+      if(id==="tasks" || id==="projects") {next.delete("projectId");next.set("view",id);}
+      else {next.set("projectId",id);next.delete("view");}
+      return next;
+    });
+  };
+  const setAllFloor=value=>setParams(previous=>{
+    const next=new URLSearchParams(previous);
+    if(value===null)next.delete("floor");else next.set("floor",String(value));
+    return next;
+  });
   const [deleteWorkOpen,setDeleteWorkOpen]=useState(false);
   const [projectMenu,setProjectMenu]=useState(null),[projectEditor,setProjectEditor]=useState(null),[projectDeletion,setProjectDeletion]=useState(null);
   /* sidebar state */
   const [openSidebar, setOpenSidebar] = useState(false);
   const [expandedIds, setExpandedIds] = useState([]);
-  const [selectedId, setSelectedId] = useState(params.get("projectId"));
-  const [selectedLevel, setSelectedLevel] = useState(params.get("projectId") ? 1 : null);
 
   /* board state */
   const boardQuery=useWorks({projectId:selectedId},!!selectedId && !["tasks","projects"].includes(selectedId));
@@ -885,6 +901,19 @@ export default function Dashboard() {
   } = useProjectTree();
 
   const selectedProject = useMemo(() => findProjectById(projectTree, selectedId), [projectTree, selectedId]);
+  useEffect(()=>{
+    if(!selectedId || ["tasks","projects"].includes(selectedId))return;
+    const findAncestors=(nodes,path=[])=>{
+      for(const node of nodes) {
+        if(node.id===selectedId)return path;
+        const found=findAncestors(node.children || [],[...path,node.id]);
+        if(found)return found;
+      }
+      return null;
+    };
+    const ancestors=findAncestors(projectTree);
+    if(ancestors)setExpandedIds(previous=>[...new Set([...previous,"projects",...ancestors])]);
+  },[projectTree,selectedId]);
   const handleCreateWork = () => navigate("/create-work", {
     state: {
       startNewWork: true,
@@ -933,9 +962,7 @@ export default function Dashboard() {
             onClick={event=>{event.stopPropagation();action.clearError();setProjectMenu({anchorEl:event.currentTarget,project:node});}}
             sx={{color:"inherit",p:0.25}}><MoreHorizRoundedIcon fontSize="small"/></IconButton></Tooltip> : null}
           onClick={() => {
-            setAllFloor(null);
-            setSelectedId(node.id);
-            setSelectedLevel(level);
+            selectView(node.id);
             hasChildren && toggleNode(node.id);
           }}
         />
@@ -985,7 +1012,7 @@ export default function Dashboard() {
   const deleteProject=async()=>{
     if(action.pending || !projectDeletion)return;
     if(await action.run(()=>api.delete("/projects/"+encodeURIComponent(projectDeletion.id)))) {
-      if(selectedId===projectDeletion.id){setSelectedId(null);setSelectedLevel(null);navigate("/dashboard",{replace:true});}
+      if(selectedId===projectDeletion.id)navigate("/dashboard",{replace:true});
       setProjectDeletion(null);
     }
   };
@@ -1053,7 +1080,8 @@ export default function Dashboard() {
         >
           {showTasks && <TasksPage projectId={selectedId!=="tasks" ? selectedId : undefined} floorNum={allFloor || undefined}/>}
 
-          {showBoard && (
+          {showBoard && boardQuery.isError && <Paper sx={{p:2,borderRadius:2}}><QueryFeedback query={boardQuery} label="دریافت کارهای پروژه انجام نشد. این وضعیت به معنی خالی‌بودن پروژه نیست."/></Paper>}
+          {showBoard && !boardQuery.isError && (
             <BoardPreview
               rows={boardRows}
               onMore={setAllFloor}
@@ -1187,7 +1215,7 @@ export default function Dashboard() {
                 </IconButton>
                 <IconButton
                   aria-label="کارهای شما"
-                  onClick={()=>{setAllFloor(null);setSelectedId("tasks");setSelectedLevel(0);}}
+                  onClick={()=>selectView("tasks")}
                   disableRipple
                   sx={{
                     color: "#757575",

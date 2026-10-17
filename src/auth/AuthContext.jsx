@@ -1,7 +1,7 @@
 import { createContext,useContext,useEffect,useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import api,{setCsrfToken} from '../lib/api';
-import { clearAllWorkDraftFiles } from '../lib/workDraftFiles';
+import { clearAllWorkDraftFiles,clearWorkDraftMemory } from '../lib/workDraftFiles';
 const AuthContext=createContext(null);
 export function AuthProvider({children}) {
   const [user,setUser]=useState(null),[loading,setLoading]=useState(true);
@@ -9,7 +9,7 @@ export function AuthProvider({children}) {
   const cache=useQueryClient();
   useEffect(()=>{
     let mounted=true;
-    const reset=()=>{clearAllWorkDraftFiles();setUser(null);setCsrfToken(null);cache.clear();};
+    const reset=()=>{clearWorkDraftMemory();setUser(null);setCsrfToken(null);cache.clear();};
     window.addEventListener('building:unauthorized',reset);
     api.get('/auth/me').then(({data})=>{if(mounted){setUser(data.user);setCsrfToken(data.csrfToken);}})
       .catch(()=>{}).finally(()=>{if(mounted)setLoading(false);});
@@ -21,10 +21,10 @@ export function AuthProvider({children}) {
     register:async values=>accept((await api.post('/auth/register',values)).data),
     logout:async()=>{
       await api.post('/auth/logout');
-      clearAllWorkDraftFiles();
+      await clearAllWorkDraftFiles(user.id).catch(()=>{});
       try {
         for(const key of Object.keys(sessionStorage)) {
-          if(/^(createWorkDraft:|editWorkDraft:|createProjectDraft:)/.test(key) && key.endsWith(':'+user.id))sessionStorage.removeItem(key);
+          if(/^(createWorkDraft:|editWorkDraft:|createProjectDraft:|reportDraft:|reportDialog:)/.test(key) && key.endsWith(':'+user.id))sessionStorage.removeItem(key);
         }
       } catch { /* Storage may be unavailable. */ }
       setExplicitLogout(true);setUser(null);setCsrfToken(null);cache.clear();

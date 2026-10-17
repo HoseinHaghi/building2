@@ -61,7 +61,7 @@ test('original layouts keep project, work, reports, members and status connected
  await page.getByRole('button',{name:'ویرایش مسئولین',exact:true}).click();
  await page.getByPlaceholder('جست‌وجوی نام کاربری',{exact:true}).fill(member);
  await page.getByRole('button',{name:'+ اضافه کردن',exact:true}).click();
- await expect(page.getByRole('dialog').getByText('همکار',{exact:true})).toBeVisible();
+ await expect(page.getByRole('dialog').getByRole('list',{name:'مسئولان این کار'}).getByText('همکار',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'بستن',exact:true}).click();
  await expect(page.getByRole('dialog')).toHaveCount(0);
  expect((await context.get('/api'+workPath)).status()).toBe(200);

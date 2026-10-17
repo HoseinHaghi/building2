@@ -46,7 +46,9 @@ import {useWork,useReports,useMembers} from "../hooks/useWorks";
 import {useQueryClient} from "@tanstack/react-query";
 import api,{fileUrl,errorMessage} from "../lib/api";
 import {useAction} from "../hooks/useAction";
-import {ConfirmDialog,TextDialog} from "./shared";
+import {ConfirmDialog,DraftTextDialog,QueryFeedback} from "./shared";
+import {useSessionDraft} from "../hooks/useSessionDraft";
+import {useAuth} from "../auth/AuthContext";
 
 /* ------------------------------ Icons ------------------------------ */
 import DeleteOutlineRoundedIcon from "@mui/icons-material/esm/DeleteOutlineRounded.js";
@@ -224,6 +226,7 @@ function DetailRow({ row, idx }) {
 /* ---------------------------------------------------- Main Page */
 function WorkPage() {
   const { id } = useParams();
+  const auth=useAuth();
   const location = useLocation();
   const routeTitle = location.state?.title || null;
   const navigate = useNavigate();
@@ -249,16 +252,31 @@ function WorkPage() {
   const reports=(reportQuery.data || []).map(report=>({
     id:report.id,canEdit:report.canEdit,user:report.author.name,text:report.text,date:new Intl.DateTimeFormat("fa-IR").format(new Date(report.createdAt)),
   }));
-  const [addOpen,setAddOpen]=React.useState(false),[newText,setNewText]=React.useState(""),[busy,setBusy]=React.useState(false);
+  const [busy,setBusy]=React.useState(false);
   const [editOpen,setEditOpen]=React.useState(false),[searchText,setSearchText]=React.useState("");
   const reportAction=useAction();
-  const [reportEditor,setReportEditor]=React.useState(null),[confirmation,setConfirmation]=React.useState(null);
+  const reportPrefix="reportDraft:"+id+":";
+  const [newDraft,updateNewDraft,clearNewDraft]=useSessionDraft(reportPrefix+"new:"+auth.user.id,{text:""});
+  const newText=newDraft.text;
+  const setNewText=text=>updateNewDraft({text});
+  const [dialogDraft,updateDialog,clearDialog]=useSessionDraft("reportDialog:"+id+":"+auth.user.id,{kind:null,reportId:null});
+  const addOpen=dialogDraft.kind==="new";
+  const reportEditor=dialogDraft.kind==="edit" ? reports.find(report=>report.id===dialogDraft.reportId) : null;
+  const [confirmation,setConfirmation]=React.useState(null);
+  const closeReportDialog=()=>{updateDialog({kind:null,reportId:null});clearDialog();};
   const saveReport=async text=>{
-    if(reportAction.pending || !reportEditor)return;
-    if(await reportAction.run(()=>api.patch("/works/"+encodeURIComponent(id)+"/reports/"+encodeURIComponent(reportEditor.id),{text})))setReportEditor(null);
+    if(reportAction.pending || !reportEditor)return false;
+    if(await reportAction.run(()=>api.patch("/works/"+encodeURIComponent(id)+"/reports/"+encodeURIComponent(reportEditor.id),{text}))) {
+      closeReportDialog();return true;
+    }
+    return false;
   };
   const confirmDeletion=async()=>{
     if(reportAction.pending || !confirmation)return;
+    if(confirmation.kind==="revoke") {
+      if(await reportAction.run(()=>api.delete("/projects/"+encodeURIComponent(work.projectId)+"/members/"+encodeURIComponent(confirmation.userId))))setConfirmation(null);
+      return;
+    }
     const report=confirmation.kind==="report";
     const url="/works/"+encodeURIComponent(id)+(report ? "/reports/"+encodeURIComponent(confirmation.reportId) : "");
     if(await reportAction.run(()=>api.delete(url))) {
@@ -275,11 +293,14 @@ function WorkPage() {
     }catch(error){window.alert(errorMessage(error));return null;}
     finally{setBusy(false);}
   };
-  const handleAddOpen=()=>setAddOpen(true);
-  const handleAddClose=()=>{if(busy)return;setAddOpen(false);setNewText("");};
+  const handleAddOpen=()=>{reportAction.clearError();updateDialog({kind:"new",reportId:null});};
+  const handleAddClose=()=>{if(!busy && !reportAction.pending)closeReportDialog();};
+  const handleAddDiscard=()=>{if(busy || reportAction.pending)return;setNewText("");clearNewDraft();closeReportDialog();};
   const handleAddCreate=async()=>{
-    if(busy || !newText.trim())return;
-    if(await perform(()=>api.post("/works/"+encodeURIComponent(id)+"/reports",{text:newText.trim()}))){setAddOpen(false);setNewText("");}
+    if(busy || reportAction.pending || !newText.trim())return;
+    if(await reportAction.run(()=>api.post("/works/"+encodeURIComponent(id)+"/reports",{text:newText.trim()}))) {
+      setNewText("");clearNewDraft();closeReportDialog();
+    }
   };
   const handleDoneClick=async()=>{
     if(!work || busy)return;
@@ -384,10 +405,11 @@ function WorkPage() {
         styles={`html,body{margin:0;height:100%;overflow:hidden}`}
       />
 
-      {reportEditor && <TextDialog key={reportEditor.id} open title="ویرایش گزارش" label="متن گزارش کار" multiline initial={reportEditor.text}
-        onClose={()=>setReportEditor(null)} onSave={saveReport} pending={reportAction.pending} error={reportAction.error}/>}
-      <ConfirmDialog open={!!confirmation} title={confirmation?.kind==="report" ? "حذف گزارش" : "حذف کار"}
-        description={confirmation?.kind==="report" ? "این گزارش حذف شود؟" : "این کار، گزارش‌ها و فایل‌های آن حذف می‌شوند. ادامه می‌دهید؟"}
+      {reportEditor && <DraftTextDialog key={reportEditor.id} draftKey={reportPrefix+reportEditor.id+":"+auth.user.id} open title="ویرایش گزارش" label="متن گزارش کار" multiline initial={reportEditor.text}
+        onClose={closeReportDialog} onSave={saveReport} pending={reportAction.pending} error={reportAction.error}/>}
+      <ConfirmDialog open={!!confirmation} title={confirmation?.kind==="revoke" ? "لغو دسترسی پروژه" : confirmation?.kind==="report" ? "حذف گزارش" : "حذف کار"}
+        confirmLabel={confirmation?.kind==="revoke" ? "لغو دسترسی" : "حذف"}
+        description={confirmation?.kind==="revoke" ? "دسترسی «"+confirmation.name+"» به پروژه اصلی و همه زیرپروژه‌های آن قطع و مسئولیت‌های او در این مجموعه حذف می‌شود. گزارش‌های قبلی باقی می‌مانند. ادامه می‌دهید؟" : confirmation?.kind==="report" ? "این گزارش حذف شود؟" : "این کار، گزارش‌ها و فایل‌های آن حذف می‌شوند. ادامه می‌دهید؟"}
         onClose={()=>setConfirmation(null)} onConfirm={confirmDeletion} pending={reportAction.pending} error={reportAction.error}/>
       {/* Busy overlay */}
       <Backdrop
@@ -408,10 +430,12 @@ function WorkPage() {
         <DialogTitle
           sx={{ textAlign: "center", fontWeight: 500, fontSize: 25 }}
         >
-          مدیریت اعضا
+          مسئولان کار و دسترسی پروژه
         </DialogTitle>
 
         <DialogContent sx={{ px: 2 }}>
+          <Typography sx={{fontSize:12,color:GREY_TEXT,mb:2,lineHeight:1.9}}>حذف مسئولیت فقط این کار را از مسئولیت فرد خارج می‌کند و دسترسی او به پروژه را قطع نمی‌کند.</Typography>
+          {memberQuery.isError && <QueryFeedback query={memberQuery} label="دریافت اعضای پروژه انجام نشد."/>}
           <TextField
             fullWidth
             size="small"
@@ -462,7 +486,7 @@ function WorkPage() {
 
             <Button
               variant="outlined"
-              disabled={busy || memberQuery.isLoading || !searchText.trim()}
+              disabled={busy || memberQuery.isLoading || memberQuery.isError || !searchText.trim()}
               onClick={handleMemberAdd}
               sx={{
                 borderColor: "rgba(255,112,67,0.6)",
@@ -482,7 +506,7 @@ function WorkPage() {
             </Button>
           </Box>
 
-          <Stack spacing={1.5}>
+          <Stack spacing={1.5} role="list" aria-label="مسئولان این کار">
             {members.map(({id,name}) => (
               <Box
                 key={id}
@@ -514,6 +538,9 @@ function WorkPage() {
                 </Typography>
                 <IconButton
                   size="medium"
+                  aria-label={"حذف مسئولیت "+name}
+                  title="حذف مسئولیت این کار؛ دسترسی پروژه باقی می‌ماند"
+                  disabled={busy}
                   onClick={() => handleMemberRemove(id)}
                   sx={{ color: "#ff5252", ml: -1.3 }}
                 >
@@ -522,6 +549,18 @@ function WorkPage() {
               </Box>
             ))}
           </Stack>
+          {memberQuery.data?.canManage && <Box sx={{mt:3,pt:2,borderTop:"1px solid #FFE2D6"}}>
+            <Typography sx={{fontSize:14,fontWeight:500,mb:1}}>اعضای دارای دسترسی به پروژه</Typography>
+            <Typography sx={{fontSize:12,color:GREY_TEXT,mb:1.5,lineHeight:1.9}}>لغو دسترسی، تمام پروژه اصلی و زیرپروژه‌های آن را شامل می‌شود.</Typography>
+            <Stack spacing={1}>
+              {memberQuery.data.members.map(person=><Box key={person.id} sx={{display:"flex",alignItems:"center",gap:1,bgcolor:GREY_BG,borderRadius:3,px:1.5,py:1}}>
+                <Box sx={{flex:1,minWidth:0}}><Typography sx={{fontSize:13,overflowWrap:"anywhere"}}>{person.name}</Typography><Typography sx={{fontSize:11,color:GREY_TEXT}}>{person.username}</Typography></Box>
+                {person.id===memberQuery.data.ownerId ? <Typography sx={{fontSize:11,color:GREY_TEXT}}>مالک پروژه</Typography> :
+                  <Button size="small" variant="outlined" disabled={busy || reportAction.pending} sx={{color:ORANGE,borderColor:"#ffb59f",borderRadius:2,fontSize:11,whiteSpace:"nowrap"}}
+                    aria-label={"لغو دسترسی "+person.name} onClick={()=>{reportAction.clearError();setConfirmation({kind:"revoke",userId:person.id,name:person.name});}}>لغو دسترسی</Button>}
+              </Box>)}
+            </Stack>
+          </Box>}
         </DialogContent>
 
         <DialogActions sx={{ justifyContent: "center", mt: 2 }}>
@@ -570,6 +609,7 @@ function WorkPage() {
             inputProps={{"aria-label":"متن گزارش کار"}}
             value={newText}
             onChange={(e) => setNewText(e.target.value)}
+            disabled={busy || reportAction.pending}
             sx={{
               bgcolor: GREY_BG,
               borderRadius: 1,
@@ -580,12 +620,13 @@ function WorkPage() {
               },
             }}
           />
+          {reportAction.error && <Typography role="alert" color="error" sx={{mt:1,fontSize:12}}>{reportAction.error}</Typography>}
         </DialogContent>
         <DialogActions sx={{ justifyContent: "center", gap: 1, pt: 1 }}>
           <CustomButton
             variant="contained"
             onClick={handleAddCreate}
-            disabled={busy || !newText.trim()}
+            disabled={busy || reportAction.pending || !newText.trim()}
             sx={{
               minWidth: 100,
               flex: "1 1 0",
@@ -602,7 +643,8 @@ function WorkPage() {
           </CustomButton>
           <CustomButton
             variant="contained"
-            onClick={handleAddClose}
+            onClick={handleAddDiscard}
+            disabled={busy || reportAction.pending}
             sx={{
               minWidth: 100,
               flex: "1 1 0",
@@ -861,7 +903,8 @@ function WorkPage() {
               </Stack>
 
               <Stack spacing={2} sx={{ p: 1.5, pt: 1 }}>
-                {reports.map(({ id:reportId, user, text, date, canEdit }) => (
+                <QueryFeedback query={reportQuery} label="دریافت گزارش‌ها انجام نشد. این خطا به معنی نبودن گزارش نیست؛ دوباره تلاش کنید."/>
+                {!reportQuery.isError && reports.map(({ id:reportId, user, text, date, canEdit }) => (
                   <Box
                     key={reportId}
                     sx={{
@@ -918,7 +961,7 @@ function WorkPage() {
                       </Typography>
                       {canEdit && <Stack direction="row" justifyContent="flex-end" sx={{mt:0.5}}>
                         <Tooltip title="ویرایش گزارش"><IconButton size="small" aria-label={"ویرایش گزارش: "+text} disabled={busy || reportAction.pending}
-                          onClick={()=>{reportAction.clearError();setReportEditor({id:reportId,text});}} sx={{color:ORANGE}}><EditRoundedIcon fontSize="small"/></IconButton></Tooltip>
+                          onClick={()=>{reportAction.clearError();updateDialog({kind:"edit",reportId});}} sx={{color:ORANGE}}><EditRoundedIcon fontSize="small"/></IconButton></Tooltip>
                         <Tooltip title="حذف گزارش"><IconButton size="small" aria-label={"حذف گزارش: "+text} disabled={busy || reportAction.pending}
                           onClick={()=>{reportAction.clearError();setConfirmation({kind:"report",reportId});}} sx={{color:ORANGE}}><DeleteOutlineRoundedIcon fontSize="small"/></IconButton></Tooltip>
                       </Stack>}
@@ -978,4 +1021,7 @@ const CustomButton = styled(Button)({
   textTransform: "none",
 });
 
-export default WorkPage;
+export default function WorkPageRoute() {
+  const {id}=useParams(),{user}=useAuth();
+  return <WorkPage key={user.id+":"+id}/>;
+}

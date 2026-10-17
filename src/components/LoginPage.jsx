@@ -3,11 +3,11 @@
  *
  * A right‑to‑left (RTL) login / sign‑up form built with React and
  * Material‑UI (MUI).  It supports two tabs (Login, Sign‑Up), basic
- * client‑side validation, an error snackbar, and a 3‑second UI lock
- * to throttle repeated submissions.
+ * client-side validation, a persistent dismissible error bar, and a
+ * submission lock while a request is running.
  *******************************************************************/
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Box,
   Paper,
@@ -126,9 +126,15 @@ function ErrorBar({ message, onClose }) {
     >
       {/* Close (X) side */}
       <Box
+        component="button"
+        type="button"
+        aria-label="بستن پیام خطا"
         onClick={onClose}
         sx={{
           width: 52,
+          flexShrink: 0,
+          border: 0,
+          padding: 0,
           bgcolor: "#b71c1c",
           display: "flex",
           alignItems: "center",
@@ -143,6 +149,7 @@ function ErrorBar({ message, onClose }) {
 
       {/* Message area */}
       <Box
+        role="alert"
         dir="rtl"
         sx={{
           flex: 1,
@@ -168,24 +175,8 @@ export default function LoginPage() {
   const safeDestination=destination.startsWith("/") && !destination.startsWith("//") && !destination.startsWith("/login") ? destination : "/dashboard";
   const [tab, setTab] = useState("login"); // "login" | "signup"
 
-  /* ---------- 3‑second lock to throttle clicks ---------- */
-  const [isLocked, setIsLocked] = useState(false);
-  const lockTimer = useRef(null);
-  useEffect(
-    () => () => clearTimeout(lockTimer.current), // Clear on unmount
-    []
-  );
-
-  /* -------- Error bar with automatic 3‑second hide -------- */
-  const [errorMsg, setErrorMsg] = useState("");
-  const errTimer = useRef(null);
-  useEffect(() => {
-    if (errorMsg) {
-      clearTimeout(errTimer.current);
-      errTimer.current = setTimeout(() => setErrorMsg(""), 3000);
-    }
-    return () => clearTimeout(errTimer.current);
-  }, [errorMsg]);
+  const [isLocked,setIsLocked]=useState(false);
+  const [errorMsg,setErrorMsg]=useState("");
 
   /* ---------------- Form state (separate per tab) ---------------- */
   // Login fields
@@ -304,7 +295,7 @@ export default function LoginPage() {
           {/* ======================== Forms ======================== */}
           {tab === "login" ? (
             /* ---------------- Login form ---------------- */
-            <Box key="login" sx={{ width: "100%" }}>
+            <Box key="login" component="form" onSubmit={event=>{event.preventDefault();handleLogin();}} sx={{ width: "100%" }}>
               <Stack spacing={fieldSpacing} sx={{ mb: 3 }}>
                 <CustomTextField
                   fullWidth
@@ -330,14 +321,14 @@ export default function LoginPage() {
               <PrimaryButton
                 fullWidth
                 disabled={isLocked}
-                onClick={handleLogin}
+                type="submit"
               >
                 وارد شوید
               </PrimaryButton>
             </Box>
           ) : (
             /* --------------- Sign‑Up form ---------------- */
-            <Box key="signup" sx={{ width: "100%" }}>
+            <Box key="signup" component="form" onSubmit={event=>{event.preventDefault();handleSignup();}} sx={{ width: "100%" }}>
               <Stack spacing={fieldSpacing} sx={{ mb: 3 }}>
                 <CustomTextField
                   fullWidth
@@ -391,7 +382,7 @@ export default function LoginPage() {
               <PrimaryButton
                 fullWidth
                 disabled={isLocked}
-                onClick={handleSignup}
+                type="submit"
               >
                 ثبت نام
               </PrimaryButton>

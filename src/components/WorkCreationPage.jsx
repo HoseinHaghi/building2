@@ -46,7 +46,7 @@ import {useWork} from "../hooks/useWorks";
 import {useAuth} from "../auth/AuthContext";
 import {errorMessage} from "../lib/api";
 import {readSessionDraft,useSessionDraft} from "../hooks/useSessionDraft";
-import {readWorkDraftFiles,setWorkDraftFile,clearWorkDraftFiles} from "../lib/workDraftFiles";
+import {useWorkDraftFiles} from "../hooks/useWorkDraftFiles";
 // Router hooks for navigation and reading state passed from other pages.
 import { useNavigate, useLocation,useParams } from "react-router-dom";
 
@@ -327,7 +327,7 @@ const FileNameSpan = styled("span")({
 });
 
 // File upload pill component; forwards the selected File to parent via onFile.
-const FileUploadPill = ({ label, onFile, file }) => {
+const FileUploadPill = ({ label, onFile, file, disabled }) => {
   const fileName = file?.name || "";
   // Ref to reset the native input so the same file can be re-picked.
   const inputRef = useRef(null);
@@ -335,6 +335,8 @@ const FileUploadPill = ({ label, onFile, file }) => {
   return (
     <UploadPillStyled
       component="label"
+      disabled={disabled}
+      title={label === "تصویر شاخص کار" ? "PNG، JPEG یا WebP؛ حداکثر ۱۰ مگابایت" : "حداکثر ۱۰ مگابایت"}
       endIcon={<FileUploadOutlinedIcon sx={{ color: "#9E9E9E" }} />}
     >
       {/* Show chosen file name, fallback to label */}
@@ -344,6 +346,8 @@ const FileUploadPill = ({ label, onFile, file }) => {
         ref={inputRef}
         hidden
         type="file"
+        disabled={disabled}
+        accept={label === "تصویر شاخص کار" ? ".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" : undefined}
         aria-label={label}
         onChange={(e) => {
           // Safely read the first selected file (or null).
@@ -421,7 +425,7 @@ export default function WorkCreationPage() {
 }
 
 function WorkForm({id}) {
-  const auth=useAuth(),initialWork=useWork(id),initialized=useRef(false);
+  const auth=useAuth(),initialWork=useWork(id),initialized=useRef(false),submitted=useRef(false);
   const navigate=useNavigate(),location=useLocation();
   const DRAFT_KEY=(id ? "editWorkDraft:"+id+":" : DRAFT_PREFIX)+auth.user.id;
   const fresh=!!location.state?.startNewWork;
@@ -439,15 +443,9 @@ function WorkForm({id}) {
   const setPrereq=prereq=>updateDraft({prereq});
   const setSelectedProjectId=selectedProjectId=>updateDraft({selectedProjectId});
   const setSelectedProjectPath=selectedProjectPath=>updateDraft({selectedProjectPath});
-  const [files,setFiles]=useState(()=>{
-    if(fresh)clearWorkDraftFiles(DRAFT_KEY);
-    return readWorkDraftFiles(DRAFT_KEY);
-  });
-  const cover=files.cover,attachment=files.attachment;
-  const setFile=(kind,file)=>{
-    setWorkDraftFile(DRAFT_KEY,kind,file);
-    setFiles(readWorkDraftFiles(DRAFT_KEY));
-  };
+  const fileDraft=useWorkDraftFiles(DRAFT_KEY,fresh || !hadSavedDraft.current);
+  const {cover,attachment}=fileDraft.files;
+  const setFile=(kind,file)=>fileDraft.select(kind,file);
   const [uploadsKey,setUploadsKey]=useState(0);
   useEffect(()=>{
     if(!id || !initialWork.data || initialized.current)return;
@@ -469,15 +467,15 @@ function WorkForm({id}) {
   },[id,location.state,navigate,updateDraft]);
   const {mutate:addWork,isPending}=useSaveWork(id);
   const persistDraft=()=>updateDraft({});
-  const clearDraft=()=>{
+  const clearDraft=async()=>{
     removeDraft();
-    clearWorkDraftFiles(DRAFT_KEY);
+    await fileDraft.clear();
   };
 
   /* ---------- SUBMIT ---------- */
   // Submit handler that validates completion and posts FormData
   const handleCreate = () => {
-    if (!isFormComplete) return;
+    if (submitted.current || !isFormComplete || isPending || fileDraft.loading || fileDraft.saving) return;
 
     const floorNumber = (() => {
       const m = String(floor).match(/\d+/);
@@ -509,8 +507,9 @@ function WorkForm({id}) {
     if (attachment) fd.append("attachment", attachment);
 
     addWork(fd, {
-      onSuccess: createdWork => {
-        clearDraft();
+      onSuccess: async createdWork => {
+        submitted.current=true;
+        await clearDraft();
         navigate("/works/"+encodeURIComponent(id || createdWork.id));
       },
       onError: error=>window.alert(errorMessage(error)),
@@ -518,7 +517,7 @@ function WorkForm({id}) {
   };
 
   /* ---------- RESET ---------- */
-  const resetForm = () => {
+  const resetForm = async () => {
     // Clear all inputs and local selection.
     setTitle("");
     setProject("");
@@ -526,18 +525,18 @@ function WorkForm({id}) {
     setSummary("");
     setPrereq("");
     // Clear files and re-mount upload pills to clear their visible labels.
-    setFiles({});
     setSelectedProjectId(null);
     setSelectedProjectPath("");
     setUploadsKey((k) => k + 1);
     // Remove any persisted draft from sessionStorage.
-    clearDraft();
+    await clearDraft();
   };
 
-  const handleCancel = () => {
-    if(id){clearDraft();navigate("/works/"+encodeURIComponent(id));return;}
+  const handleCancel = async () => {
+    if(isPending || fileDraft.loading || fileDraft.saving)return;
+    if(id){await clearDraft();navigate("/works/"+encodeURIComponent(id));return;}
     const destination=selectedProjectId ? "/dashboard?projectId="+encodeURIComponent(selectedProjectId) : "/dashboard";
-    resetForm();navigate(destination, { replace: true, state: null });
+    await resetForm();navigate(destination, { replace: true, state: null });
   };
 
   /* ---------- LIGHTWEIGHT LOCK ---------- */
@@ -552,7 +551,7 @@ function WorkForm({id}) {
     // Fixed root; everything inside renders above a possible Backdrop.
     <Root>
       {/* Global loading/lock overlay shown while isLocked is true */}
-      <Backdrop open={isPending || (!!id && initialWork.isLoading)} sx={{ zIndex: 2000, color: "#fff" }}>
+      <Backdrop open={isPending || fileDraft.loading || fileDraft.saving || (!!id && initialWork.isLoading)} sx={{ zIndex: 2000, color: "#fff" }}>
         <CircularProgress color="inherit" />
       </Backdrop>
 
@@ -671,14 +670,18 @@ function WorkForm({id}) {
               key={`cover-${uploadsKey}`}
               label="تصویر شاخص کار"
               file={cover}
+              disabled={isPending || fileDraft.loading || fileDraft.saving}
               onFile={file=>setFile("cover",file)}
             />
             <FileUploadPill
               key={`att-${uploadsKey}`}
               label="فایل پیوست"
               file={attachment}
+              disabled={isPending || fileDraft.loading || fileDraft.saving}
               onFile={file=>setFile("attachment",file)}
             />
+            <Typography sx={{fontFamily,fontSize:10,color:"#757575",lineHeight:1.4}}>حداکثر هر فایل ۱۰ مگابایت؛ تصویر: PNG، JPEG یا WebP.</Typography>
+            {fileDraft.error && <Typography role="alert" color="error" sx={{fontFamily,fontSize:12,maxHeight:48,overflowY:"auto"}}>{fileDraft.error}</Typography>}
           </Stack>
 
           {/* Action buttons row: Create (primary) and Cancel (secondary) */}
@@ -694,7 +697,7 @@ function WorkForm({id}) {
             {/* Create triggers submit; disabled while pending or incomplete */}
             <CreateBtn
               onClick={handleCreate}
-              disabled={isPending || !isFormComplete}
+              disabled={isPending || fileDraft.loading || fileDraft.saving || !isFormComplete}
               sx={{
                 flex: "1 1 0",
                 backgroundColor: "#ff7043",
@@ -712,7 +715,7 @@ function WorkForm({id}) {
             {/* Cancel clears the draft and returns to the selected project's dashboard. */}
             <CancelBtn
               onClick={handleCancel}
-              disabled={isPending}
+              disabled={isPending || fileDraft.loading || fileDraft.saving}
               sx={{
                 flex: "1 1 0",
                 backgroundColor: "#E0E0E0",
