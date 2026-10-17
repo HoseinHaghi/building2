@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {randomUUID} from 'node:crypto';
-import {register,password} from './helpers';
+import {register,password,clientHeaders} from './helpers';
 test('original layouts keep project, work, reports, members and status connected',async({page,playwright})=>{
  test.setTimeout(180000);
  const errors=[];page.on('pageerror',error=>errors.push(error.message));page.on('dialog',dialog=>dialog.accept());
@@ -56,7 +56,7 @@ test('original layouts keep project, work, reports, members and status connected
  await page.reload();await expect(page.getByText('گزارش در دیتابیس',{exact:true})).toBeVisible();
  const downloadPromise=page.waitForEvent('download');await page.getByRole('link',{name:'گزارش.txt',exact:true}).click();
  expect((await downloadPromise).suggestedFilename()).toBe('گزارش.txt');
- const member='member_'+randomUUID().slice(0,8),context=await playwright.request.newContext({baseURL:'http://127.0.0.1:5190',extraHTTPHeaders:{Origin:'http://127.0.0.1:5190'}});
+ const member='member_'+randomUUID().slice(0,8),context=await playwright.request.newContext({baseURL:'http://127.0.0.1:5190',extraHTTPHeaders:{...clientHeaders(),Origin:'http://127.0.0.1:5190'}});
  const response=await context.post('/api/auth/register',{data:{name:'همکار',username:member,password}});expect(response.status()).toBe(201);
  await page.getByRole('button',{name:'ویرایش مسئولین',exact:true}).click();
  await page.getByPlaceholder('جست‌وجوی نام کاربری',{exact:true}).fill(member);

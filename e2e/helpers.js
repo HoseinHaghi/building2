@@ -1,7 +1,17 @@
 import {expect} from '@playwright/test';
-import {randomUUID} from 'node:crypto';
+import {randomInt,randomUUID} from 'node:crypto';
 export const password='original-ui-test-password';
+export const clientHeaders=()=>({'X-Forwarded-For':`10.${randomInt(256)}.${randomInt(256)}.${randomInt(1,255)}`});
+const clients=new WeakSet();
+export async function isolateClient(page) {
+ const context=page.context();
+ if(clients.has(context))return;
+ // Keep real rate limits enabled, with a separate budget for each simulated client.
+ await context.setExtraHTTPHeaders(clientHeaders());
+ clients.add(context);
+}
 export async function register(page){
+ await isolateClient(page);
  const username='original_'+randomUUID().slice(0,8);
  await page.goto('/login');
  await page.getByRole('button',{name:'ثبت نام',exact:true}).click();

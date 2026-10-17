@@ -7,6 +7,10 @@ export function readSessionDraft(key) {
   } catch { return null; }
 }
 
+export function removeSessionDraft(key) {
+  try { sessionStorage.removeItem(key); } catch { /* Storage may be unavailable. */ }
+}
+
 export function useSessionDraft(key, defaults, fresh = false) {
   const [draft, setDraft] = useState(() => {
     const initial = { ...defaults, ...(fresh ? {} : readSessionDraft(key)) };
@@ -22,8 +26,6 @@ export function useSessionDraft(key, defaults, fresh = false) {
     try { sessionStorage.setItem(key, JSON.stringify(next)); } catch { /* Keep editing in memory. */ }
     setDraft(next);
   }, [key]);
-  const clear = useCallback(() => {
-    try { sessionStorage.removeItem(key); } catch { /* Storage may be unavailable. */ }
-  }, [key]);
+  const clear = useCallback(() => removeSessionDraft(key), [key]);
   return [draft, update, clear];
 }

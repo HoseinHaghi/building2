@@ -47,7 +47,7 @@ import {useQueryClient} from "@tanstack/react-query";
 import api,{fileUrl,errorMessage} from "../lib/api";
 import {useAction} from "../hooks/useAction";
 import {ConfirmDialog,DraftTextDialog,QueryFeedback} from "./shared";
-import {useSessionDraft} from "../hooks/useSessionDraft";
+import {useSessionDraft,removeSessionDraft} from "../hooks/useSessionDraft";
 import {useAuth} from "../auth/AuthContext";
 
 /* ------------------------------ Icons ------------------------------ */
@@ -266,10 +266,13 @@ function WorkPage() {
   const closeReportDialog=()=>{updateDialog({kind:null,reportId:null});clearDialog();};
   const saveReport=async text=>{
     if(reportAction.pending || !reportEditor)return false;
-    if(await reportAction.run(()=>api.patch("/works/"+encodeURIComponent(id)+"/reports/"+encodeURIComponent(reportEditor.id),{text}))) {
-      closeReportDialog();return true;
-    }
-    return false;
+    return !!await reportAction.run(async()=>{
+      const result=await api.patch("/works/"+encodeURIComponent(id)+"/reports/"+encodeURIComponent(reportEditor.id),{text});
+      // Commit draft cleanup before background query refreshes can delay completion.
+      removeSessionDraft(reportPrefix+reportEditor.id+":"+auth.user.id);
+      closeReportDialog();
+      return result;
+    });
   };
   const confirmDeletion=async()=>{
     if(reportAction.pending || !confirmation)return;
@@ -298,9 +301,11 @@ function WorkPage() {
   const handleAddDiscard=()=>{if(busy || reportAction.pending)return;setNewText("");clearNewDraft();closeReportDialog();};
   const handleAddCreate=async()=>{
     if(busy || reportAction.pending || !newText.trim())return;
-    if(await reportAction.run(()=>api.post("/works/"+encodeURIComponent(id)+"/reports",{text:newText.trim()}))) {
+    await reportAction.run(async()=>{
+      const result=await api.post("/works/"+encodeURIComponent(id)+"/reports",{text:newText.trim()});
       setNewText("");clearNewDraft();closeReportDialog();
-    }
+      return result;
+    });
   };
   const handleDoneClick=async()=>{
     if(!work || busy)return;

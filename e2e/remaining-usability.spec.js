@@ -1,6 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {randomUUID} from 'node:crypto';
-import {register,password} from './helpers';
+import {register,password,isolateClient} from './helpers';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2uoAAAAASUVORK5CYII=','base64');
 async function fileDraftCount(page) {
@@ -96,6 +96,7 @@ test('new and edited report drafts survive reload and leaving the page without d
   await page.goto(firstPath);
   await expect(page.getByRole('dialog').getByLabel('متن گزارش کار',{exact:true})).toHaveValue('گزارش طولانی ارسال‌نشده');
   await page.getByRole('dialog').getByRole('button',{name:'ایجاد',exact:true}).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('گزارش طولانی ارسال‌نشده',{exact:true})).toBeVisible();
   await page.reload();await expect(page.getByRole('dialog')).toHaveCount(0);
   await page.getByRole('button',{name:'ویرایش گزارش: گزارش طولانی ارسال‌نشده',exact:true}).click();
@@ -114,6 +115,44 @@ test('new and edited report drafts survive reload and leaving the page without d
   await page.getByRole('dialog').getByRole('button',{name:'انصراف',exact:true}).click();
   await page.getByRole('button',{name:'ویرایش گزارش: ویرایش حفظ‌شده بعد از رفرش',exact:true}).click();
   await expect(page.getByRole('dialog').getByLabel('متن گزارش کار',{exact:true})).toHaveValue('ویرایش حفظ‌شده بعد از رفرش');
+});
+
+test('successful report saves clear drafts before a delayed background refresh finishes',async({page})=>{
+  const data=await setup(page),root=await data.project('Report refresh regression');
+  const work=await data.work(root.id,'Report refresh work');
+  await page.goto('/works/'+encodeURIComponent(work.id));
+  await page.getByRole('button',{name:'اضافه کردن گزارش',exact:true}).click();
+  await page.getByLabel('متن گزارش کار',{exact:true}).fill('Saved report');
+  let pausedRefresh=null;
+  await page.route('**/reports',async route=>{
+    const refresh=pausedRefresh;
+    if(route.request().method()==='GET' && refresh) {
+      refresh.started();
+      await refresh.gate;
+    }
+    await route.continue();
+  });
+  const saveDuringRefresh=async button=>{
+    let started,release;
+    const requested=new Promise(resolve=>{started=resolve;});
+    const gate=new Promise(resolve=>{release=resolve;});
+    pausedRefresh={started,gate};
+    try {
+      await button.click();
+      await requested;
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      expect(await page.evaluate(()=>Object.keys(sessionStorage).filter(key=>/^report(Draft|Dialog):/.test(key)))).toEqual([]);
+    } finally {pausedRefresh=null;release();}
+  };
+  await saveDuringRefresh(page.getByRole('dialog').getByRole('button',{name:'ایجاد',exact:true}));
+  await page.getByRole('button',{name:'ویرایش گزارش: Saved report',exact:true}).click();
+  await page.getByRole('dialog').getByLabel('متن گزارش کار',{exact:true}).fill('Updated report');
+  await saveDuringRefresh(page.getByRole('dialog').getByRole('button',{name:'ذخیره',exact:true}));
+  await expect(page.getByText('Updated report',{exact:true})).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('Updated report',{exact:true})).toBeVisible();
+  expect((await (await page.request.get('/api/works/'+encodeURIComponent(work.id)+'/reports')).json()).length).toBe(1);
 });
 
 test('selected files survive full reload and invalid replacements are rejected before submission',async({page})=>{
@@ -205,6 +244,7 @@ test('removing a responsibility retains access and explicit revocation removes s
 });
 
 test('login and signup submit with Enter and errors remain until dismissal or another attempt',async({page})=>{
+  await isolateClient(page);
   await page.goto('/login');
   await page.clock.install();
   await page.route('**/api/auth/login',route=>route.fulfill({status:401,json:{error:'نام کاربری یا رمز عبور اشتباه است.'}}));
