@@ -1,26 +1,40 @@
-import { createContext,useContext,useEffect,useState } from 'react';
+import { createContext,useContext,useEffect,useState,useCallback,useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import api,{setCsrfToken} from '../lib/api';
 import { clearAllWorkDraftFiles,clearWorkDraftMemory } from '../lib/workDraftFiles';
+import {clearUserSubmissions} from '../lib/submissions';
 const AuthContext=createContext(null);
 export function AuthProvider({children}) {
   const [user,setUser]=useState(null),[loading,setLoading]=useState(true);
   const [explicitLogout,setExplicitLogout]=useState(false);
+  const [sessionError,setSessionError]=useState(null),generation=useRef(0);
   const cache=useQueryClient();
-  useEffect(()=>{
-    let mounted=true;
-    const reset=()=>{clearWorkDraftMemory();setUser(null);setCsrfToken(null);cache.clear();};
-    window.addEventListener('building:unauthorized',reset);
-    api.get('/auth/me').then(({data})=>{if(mounted){setUser(data.user);setCsrfToken(data.csrfToken);}})
-      .catch(()=>{}).finally(()=>{if(mounted)setLoading(false);});
-    return()=>{mounted=false;window.removeEventListener('building:unauthorized',reset);};
+  const invalidateSessionRequest=useCallback(()=>{generation.current++;},[]);
+  const retrySession=useCallback(async()=>{
+    const current=++generation.current;
+    setLoading(true);setSessionError(null);
+    try {
+      const {data}=await api.get('/auth/me');
+      if(current===generation.current){setUser(data.user);setCsrfToken(data.csrfToken);}
+    } catch(error) {
+      if(current!==generation.current)return;
+      if(error.response?.status===401){setUser(null);setCsrfToken(null);cache.clear();}
+      else setSessionError(error);
+    } finally {if(current===generation.current)setLoading(false);}
   },[cache]);
-  const accept=data=>{cache.clear();setExplicitLogout(false);setCsrfToken(data.csrfToken);setUser(data.user);return data.user;};
-  return <AuthContext.Provider value={{user,loading,explicitLogout,
+  useEffect(()=>{
+    const reset=()=>{generation.current++;clearWorkDraftMemory();setUser(null);setCsrfToken(null);setSessionError(null);setLoading(false);cache.clear();};
+    window.addEventListener('building:unauthorized',reset);
+    retrySession();
+    return()=>{invalidateSessionRequest();window.removeEventListener('building:unauthorized',reset);};
+  },[cache,retrySession,invalidateSessionRequest]);
+  const accept=data=>{generation.current++;cache.clear();setSessionError(null);setLoading(false);setExplicitLogout(false);setCsrfToken(data.csrfToken);setUser(data.user);return data.user;};
+  return <AuthContext.Provider value={{user,loading,explicitLogout,sessionError,retrySession,
     login:async values=>accept((await api.post('/auth/login',values)).data),
     register:async values=>accept((await api.post('/auth/register',values)).data),
     logout:async()=>{
       await api.post('/auth/logout');
+      generation.current++;clearUserSubmissions(user.id);
       await clearAllWorkDraftFiles(user.id).catch(()=>{});
       try {
         for(const key of Object.keys(sessionStorage)) {

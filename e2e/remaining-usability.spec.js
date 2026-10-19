@@ -220,7 +220,7 @@ test('removing a responsibility retains access and explicit revocation removes s
     const me=await (await member.request.get('/api/auth/me')).json();
     const memberHeaders={Origin:'http://127.0.0.1:5190','X-CSRF-Token':me.csrfToken};
     expect((await page.request.post('/api/projects/'+root.id+'/members',{headers:owner.headers,data:{identifier:me.user.username}})).status()).toBe(201);
-    await page.request.put(workPath+'/assignees',{headers:owner.headers,data:{userIds:[me.user.id]}});
+    await page.request.put(workPath+'/assignees',{headers:{...owner.headers,'If-Match':JSON.stringify(work.version)},data:{userIds:[me.user.id]}});
     await member.request.post(workPath+'/reports',{headers:memberHeaders,data:{text:'گزارش عضو پیش از لغو دسترسی'}});
     expect((await member.request.get(work.cover.url)).status()).toBe(200);
     await page.goto('/works/'+encodeURIComponent(work.id));

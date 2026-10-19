@@ -33,6 +33,7 @@ import {
   Button,
   Backdrop,
   CircularProgress,
+  Alert,
 } from "@mui/material";
 // Import MUI styling utilities and theme access.
 import { styled, useTheme } from "@mui/material/styles";
@@ -47,6 +48,9 @@ import {useAuth} from "../auth/AuthContext";
 import {errorMessage} from "../lib/api";
 import {readSessionDraft,useSessionDraft} from "../hooks/useSessionDraft";
 import {useWorkDraftFiles} from "../hooks/useWorkDraftFiles";
+import {isVersionConflict} from '../lib/submissions';
+import {LatestVersionDialog} from './shared';
+import api from '../lib/api';
 // Router hooks for navigation and reading state passed from other pages.
 import { useNavigate, useLocation,useParams } from "react-router-dom";
 
@@ -431,6 +435,7 @@ export default function WorkCreationPage() {
 
 function WorkForm({id}) {
   const auth=useAuth(),initialWork=useWork(id),initialized=useRef(false),submitted=useRef(false);
+  const [conflict,setConflict]=useState(false),[review,setReview]=useState(false);
   const navigate=useNavigate(),location=useLocation();
   const DRAFT_KEY=(id ? "editWorkDraft:"+id+":" : DRAFT_PREFIX)+auth.user.id;
   const fresh=!!location.state?.startNewWork;
@@ -438,7 +443,7 @@ function WorkForm({id}) {
   const [draft,updateDraft,removeDraft]=useSessionDraft(DRAFT_KEY,{
     title:"",project:fresh ? location.state.selectedPath || "" : "",floor:"",summary:"",prereq:"",
     selectedProjectId:fresh ? location.state.selectedId || null : null,
-    selectedProjectPath:fresh ? location.state.selectedPath || "" : "",
+    selectedProjectPath:fresh ? location.state.selectedPath || "" : "",version:null,
   },fresh);
   const {title,project,floor,summary,prereq,selectedProjectId,selectedProjectPath}=draft;
   const setTitle=title=>updateDraft({title});
@@ -459,7 +464,7 @@ function WorkForm({id}) {
     const work=initialWork.data;
     updateDraft({title:work.title,project:work.project,floor:floors[work.floorNum-1],
       summary:work.summary,prereq:work.prerequisite,
-      selectedProjectId:work.projectId,selectedProjectPath:work.project});
+      selectedProjectId:work.projectId,selectedProjectPath:work.project,version:work.version});
   },[id,initialWork.data,updateDraft]);
   useEffect(()=>{
     if(id)return;
@@ -511,13 +516,13 @@ function WorkForm({id}) {
     if (cover) fd.append("cover", cover);
     if (attachment) fd.append("attachment", attachment);
 
-    addWork(fd, {
+    addWork({form:fd,version:draft.version,scope:DRAFT_KEY}, {
       onSuccess: async createdWork => {
         submitted.current=true;
         await clearDraft();
         navigate("/works/"+encodeURIComponent(id || createdWork.id));
       },
-      onError: error=>window.alert(errorMessage(error)),
+      onError: error=>{if(isVersionConflict(error))setConflict(true);else window.alert(errorMessage(error));},
     });
   };
 
@@ -555,6 +560,12 @@ function WorkForm({id}) {
   return (
     // Fixed root; everything inside renders above a possible Backdrop.
     <Root>
+      {review && <LatestVersionDialog load={async()=>(await api.get('/works/'+encodeURIComponent(id))).data}
+        describe={latest=>[{label:'عنوان کار',value:latest.title},{label:'طبقه',value:floors[latest.floorNum-1]},
+          {label:'شرح کار',value:latest.summary},{label:'پیش‌نیاز',value:latest.prerequisite},
+          {label:'تصویر شاخص',value:latest.cover?.name},{label:'پیوست',value:latest.attachment?.name}]}
+        onClose={()=>setReview(false)} onAccept={latest=>{updateDraft({title:latest.title,project:latest.project,floor:floors[latest.floorNum-1],
+          summary:latest.summary,prereq:latest.prerequisite,selectedProjectId:latest.projectId,selectedProjectPath:latest.project,version:latest.version});setConflict(false);setReview(false);}}/>}
       {/* Global loading/lock overlay shown while isLocked is true */}
       <Backdrop open={isPending || fileDraft.loading || fileDraft.saving || (!!id && initialWork.isLoading)} sx={{ zIndex: 2000, color: "#fff" }}>
         <CircularProgress color="inherit" />
@@ -591,6 +602,8 @@ function WorkForm({id}) {
             sx={{width:"100%",minHeight:0,overflowY:"auto",overflowX:"hidden",pt:1.5,pb:0.5,
               overscrollBehavior:"contain",scrollbarWidth:"thin",scrollbarColor:"#c7c7c7 transparent",scrollbarGutter:"stable both-edges"}}>
           <Stack spacing={1.25} alignItems="center" sx={{'& > *':{flexShrink:0}}}>
+            {conflict && <Alert severity="warning" sx={{fontFamily,width:fieldWidth,maxWidth:'100%',boxSizing:'border-box',borderRadius:2}}
+              action={<Button onClick={()=>setReview(true)} sx={{fontFamily}}>بررسی نسخه جدید</Button>}>اطلاعات این کار تغییر کرده است. متن شما حفظ شده؛ پیش از ذخیره، نسخه جدید را بررسی کنید.</Alert>}
             {/* Title input (required) */}
             <TextFieldPill
               label="عنوان کار"

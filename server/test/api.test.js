@@ -11,6 +11,14 @@ const origin='http://localhost:5173';
 async function request(method,url,body,account,extra={}) {
   const headers={Origin:origin,...extra};
   if(account){headers.Cookie=account.cookie;headers['X-CSRF-Token']=account.csrfToken;}
+  if(account && !Object.hasOwn(headers,'If-Match') && ['PATCH','PUT'].includes(method) && url.startsWith('/works/')) {
+    const match=url.match(/^(\/works\/[^/]+)(?:\/(reports)\/([^/]+)|\/(?:status|assignees))?$/);
+    if(match) {
+      const current=await request('GET',match[1]+(match[2] ? '/reports' : ''),null,account);
+      const version=match[2] ? current.data.find?.(report=>report.id===match[3])?.version : current.data.version;
+      if(version)headers['If-Match']=JSON.stringify(version);
+    }
+  }
   let payload=body;
   if(body && !(body instanceof FormData)){headers['Content-Type']='application/json';payload=JSON.stringify(body);}
   const response=await fetch(base+'/api'+url,{method,headers,body:payload});

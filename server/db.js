@@ -54,6 +54,14 @@ export function openDatabase(filename) {
       PRAGMA foreign_keys=ON;
     `);
   }
+  if (!db.prepare('SELECT 1 FROM schema_versions WHERE version=3').get()) db.exec(`
+    BEGIN IMMEDIATE;
+    CREATE TABLE request_keys(user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      request_key TEXT NOT NULL,fingerprint TEXT NOT NULL,resource_type TEXT NOT NULL,resource_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,PRIMARY KEY(user_id,request_key));
+    INSERT INTO schema_versions VALUES(3);
+    COMMIT;
+  `);
   return db;
 }
 export function transaction(db, action) {

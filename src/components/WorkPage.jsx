@@ -39,6 +39,7 @@ import {
   createTheme,
   CircularProgress,
   Tooltip,
+  Alert,
 } from "@mui/material";
 import { styled } from "@mui/material/styles";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
@@ -49,6 +50,7 @@ import {useAction} from "../hooks/useAction";
 import {ConfirmDialog,DraftTextDialog,QueryFeedback} from "./shared";
 import {useSessionDraft,removeSessionDraft} from "../hooks/useSessionDraft";
 import {useAuth} from "../auth/AuthContext";
+import {postOnce,versionHeaders,isVersionConflict} from '../lib/submissions';
 
 /* ------------------------------ Icons ------------------------------ */
 import DeleteOutlineRoundedIcon from "@mui/icons-material/esm/DeleteOutlineRounded.js";
@@ -250,10 +252,11 @@ function WorkPage() {
 
   const members=work?.assignees || [];
   const reports=(reportQuery.data || []).map(report=>({
-    id:report.id,canEdit:report.canEdit,user:report.author.name,text:report.text,date:new Intl.DateTimeFormat("fa-IR").format(new Date(report.createdAt)),
+    id:report.id,version:report.version,canEdit:report.canEdit,user:report.author.name,text:report.text,date:new Intl.DateTimeFormat("fa-IR").format(new Date(report.createdAt)),
   }));
   const [busy,setBusy]=React.useState(false);
   const [editOpen,setEditOpen]=React.useState(false),[searchText,setSearchText]=React.useState("");
+  const [assignmentVersion,setAssignmentVersion]=React.useState(null),[workConflict,setWorkConflict]=React.useState(false);
   const reportAction=useAction();
   const reportPrefix="reportDraft:"+id+":";
   const [newDraft,updateNewDraft,clearNewDraft]=useSessionDraft(reportPrefix+"new:"+auth.user.id,{text:""});
@@ -264,10 +267,10 @@ function WorkPage() {
   const reportEditor=dialogDraft.kind==="edit" ? reports.find(report=>report.id===dialogDraft.reportId) : null;
   const [confirmation,setConfirmation]=React.useState(null);
   const closeReportDialog=()=>{updateDialog({kind:null,reportId:null});clearDialog();};
-  const saveReport=async text=>{
+  const saveReport=async(text,version)=>{
     if(reportAction.pending || !reportEditor)return false;
     return !!await reportAction.run(async()=>{
-      const result=await api.patch("/works/"+encodeURIComponent(id)+"/reports/"+encodeURIComponent(reportEditor.id),{text});
+      const result=await api.patch("/works/"+encodeURIComponent(id)+"/reports/"+encodeURIComponent(reportEditor.id),{text},{headers:versionHeaders(version)});
       // Commit draft cleanup before background query refreshes can delay completion.
       removeSessionDraft(reportPrefix+reportEditor.id+":"+auth.user.id);
       closeReportDialog();
@@ -293,7 +296,7 @@ function WorkPage() {
       const result=await task();
       await Promise.all(["works","reports","members","projects"].map(key=>cache.invalidateQueries({queryKey:[key]})));
       return result;
-    }catch(error){window.alert(errorMessage(error));return null;}
+    }catch(error){if(isVersionConflict(error))setWorkConflict(true);else window.alert(errorMessage(error));return null;}
     finally{setBusy(false);}
   };
   const handleAddOpen=()=>{reportAction.clearError();updateDialog({kind:"new",reportId:null});};
@@ -302,7 +305,7 @@ function WorkPage() {
   const handleAddCreate=async()=>{
     if(busy || reportAction.pending || !newText.trim())return;
     await reportAction.run(async()=>{
-      const result=await api.post("/works/"+encodeURIComponent(id)+"/reports",{text:newText.trim()});
+      const result=await postOnce(reportPrefix+"new:"+auth.user.id,"/works/"+encodeURIComponent(id)+"/reports",{text:newText.trim()});
       setNewText("");clearNewDraft();closeReportDialog();
       return result;
     });
@@ -310,11 +313,17 @@ function WorkPage() {
   const handleDoneClick=async()=>{
     if(!work || busy)return;
     const status=work.status==="done" ? "in_progress" : "done";
-    if(await perform(()=>api.patch("/works/"+encodeURIComponent(id)+"/status",{status}))) {
+    if(await perform(()=>api.patch("/works/"+encodeURIComponent(id)+"/status",{status},{headers:versionHeaders(work.version)}))) {
       if(status==="done")navigate("/dashboard?projectId="+encodeURIComponent(work.projectId));
     }
   };
-  const handleEditOpen=()=>setEditOpen(true);
+  const handleEditOpen=()=>{setAssignmentVersion(work.version);setWorkConflict(false);setEditOpen(true);};
+  const reloadWork=async()=>{
+    const result=await perform(()=>api.get('/works/'+encodeURIComponent(id)));
+    if(result){setAssignmentVersion(result.data.version);setWorkConflict(false);}
+  };
+  const conflictNotice=<Alert severity="warning" sx={{fontFamily:'IRANYekanWeb',borderRadius:2,mb:2}}
+    action={<Button disabled={busy} onClick={reloadWork} sx={{fontFamily:'inherit'}}>دریافت نسخه جدید</Button>}>اطلاعات این کار تغییر کرده است. تغییر شما اعمال نشد؛ آخرین مسئول‌ها و وضعیت کار را دریافت کنید.</Alert>;
   const handleEditClose=()=>{if(busy)return;setEditOpen(false);setSearchText("");};
   const handleMemberAdd=async()=>{
     if(busy || !searchText.trim() || !work?.canEdit)return;
@@ -328,9 +337,13 @@ function WorkPage() {
     }
     if(!member){window.alert("نام کاربری یک عضو پروژه را وارد کنید.");return;}
     const userIds=[...new Set([...members.map(user=>user.id),member.id])];
-    if(await perform(()=>api.put("/works/"+encodeURIComponent(id)+"/assignees",{userIds})))setSearchText("");
+    const result=await perform(()=>api.put("/works/"+encodeURIComponent(id)+"/assignees",{userIds},{headers:versionHeaders(assignmentVersion)}));
+    if(result){setAssignmentVersion(result.data.version);setSearchText("");}
   };
-  const handleMemberRemove=userId=>perform(()=>api.put("/works/"+encodeURIComponent(id)+"/assignees",{userIds:members.filter(user=>user.id!==userId).map(user=>user.id)}));
+  const handleMemberRemove=async userId=>{
+    const result=await perform(()=>api.put("/works/"+encodeURIComponent(id)+"/assignees",{userIds:members.filter(user=>user.id!==userId).map(user=>user.id)},{headers:versionHeaders(assignmentVersion)}));
+    if(result)setAssignmentVersion(result.data.version);
+  };
   const handleDelete=()=>{
     if(!work?.canEdit)return;
     reportAction.clearError();setConfirmation({kind:"work"});
@@ -411,6 +424,8 @@ function WorkPage() {
       />
 
       {reportEditor && <DraftTextDialog key={reportEditor.id} draftKey={reportPrefix+reportEditor.id+":"+auth.user.id} open title="ویرایش گزارش" label="متن گزارش کار" multiline initial={reportEditor.text}
+        version={reportEditor.version} conflict={reportAction.conflict} onResolved={reportAction.clearError}
+        loadLatest={async()=>{const {data}=await api.get('/works/'+encodeURIComponent(id)+'/reports');const latest=data.find(report=>report.id===reportEditor.id);if(!latest)throw new Error('گزارش حذف شده است.');return latest;}}
         onClose={closeReportDialog} onSave={saveReport} pending={reportAction.pending} error={reportAction.error}/>}
       <ConfirmDialog open={!!confirmation} title={confirmation?.kind==="revoke" ? "لغو دسترسی پروژه" : confirmation?.kind==="report" ? "حذف گزارش" : "حذف کار"}
         confirmLabel={confirmation?.kind==="revoke" ? "لغو دسترسی" : "حذف"}
@@ -439,6 +454,7 @@ function WorkPage() {
         </DialogTitle>
 
         <DialogContent sx={{ px: 2 }}>
+          {workConflict && conflictNotice}
           <Typography sx={{fontSize:12,color:GREY_TEXT,mb:2,lineHeight:1.9}}>حذف مسئولیت فقط این کار را از مسئولیت فرد خارج می‌کند و دسترسی او به پروژه را قطع نمی‌کند.</Typography>
           {memberQuery.isError && <QueryFeedback query={memberQuery} label="دریافت اعضای پروژه انجام نشد."/>}
           <TextField
@@ -714,6 +730,7 @@ function WorkPage() {
             </IconButton>
           </Tooltip>
           <Box sx={{ px: 2, display: "flex", flexDirection: "column", gap: 2 }}>
+            {workConflict && !editOpen && conflictNotice}
             {/* Thumbnail (در صورت نیاز می‌توان کاور را هم اینجا نمایش داد) */}
             <Box
               style={{backgroundImage:work?.cover ? "url("+fileUrl(work.cover)+")" : undefined,backgroundSize:"cover",backgroundPosition:"center"}}

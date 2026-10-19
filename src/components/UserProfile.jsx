@@ -1240,7 +1240,7 @@ export default function Dashboard() {
             )}
           </Box>
 
-          <Box sx={{ px: openSidebar ? 2 : 0, pt: 1.5, pb: 0.5, display: "flex", flexDirection: "column", alignItems: "center", gap: 1, flexShrink: 0 }}>
+          <Box sx={{ px: openSidebar ? 2 : 0, pt: 1.5, pb: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 0.5, flexShrink: 0 }}>
             <SidebarAction
               expanded={openSidebar}
               label="ایجاد کار"

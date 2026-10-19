@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { id,now,text,fail,accessProject,projectMembers,serializeProject } from '../domain.js';
 import { transaction } from '../db.js';
+import {requestKey,rememberRequest} from '../reliability.js';
 
 export function projectRoutes(db) {
   const router=Router();
@@ -15,13 +16,23 @@ export function projectRoutes(db) {
     res.json(roots);
   });
   router.post('/projects',(req,res)=>{
-    const name=text(req.body.name,'نام پروژه');
-    const parentId=req.body.parentId==null ? null : text(req.body.parentId,'پروژه والد',100);
-    const parent=parentId ? accessProject(db,parentId,req.user.id) : null;
-    if (parent && serializeProject(db,parent,req.user.id).pathNames.length>=12) fail(400,'عمق زیرپروژه‌ها نباید بیشتر از ۱۲ باشد.');
-    const projectId=id();
-    db.prepare('INSERT INTO projects VALUES(?,?,?,?,?,?)').run(projectId,name,parentId,parent?.root_id || projectId,parent?.owner_id || req.user.id,now());
-    res.status(201).json(serializeProject(db,db.prepare('SELECT * FROM projects WHERE id=?').get(projectId),req.user.id));
+    let result;
+    transaction(db,()=>{
+      const name=text(req.body.name,'نام پروژه');
+      const parentId=req.body.parentId==null ? null : text(req.body.parentId,'پروژه والد',100);
+      const parent=parentId ? accessProject(db,parentId,req.user.id) : null;
+      const record=requestKey(db,req,'project');
+      if(record?.resourceId) {
+        if(!db.prepare('SELECT 1 FROM projects WHERE id=?').get(record.resourceId))fail(410,'پروژه ثبت‌شده این درخواست حذف شده است.');
+        result=serializeProject(db,accessProject(db,record.resourceId,req.user.id),req.user.id);return;
+      }
+      if (parent && serializeProject(db,parent,req.user.id).pathNames.length>=12) fail(400,'عمق زیرپروژه‌ها نباید بیشتر از ۱۲ باشد.');
+      const projectId=id();
+      db.prepare('INSERT INTO projects VALUES(?,?,?,?,?,?)').run(projectId,name,parentId,parent?.root_id || projectId,parent?.owner_id || req.user.id,now());
+      rememberRequest(db,req,record,'project',projectId);
+      result=serializeProject(db,db.prepare('SELECT * FROM projects WHERE id=?').get(projectId),req.user.id);
+    });
+    res.status(201).json(result);
   });
   router.get('/projects/:id',(req,res)=>res.json(serializeProject(db,accessProject(db,req.params.id,req.user.id),req.user.id)));
   router.patch('/projects/:id',(req,res)=>{

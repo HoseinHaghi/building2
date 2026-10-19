@@ -21,6 +21,16 @@ Email is optional; omitted or empty email is stored as null. The original signup
 
 The session is valid for seven days. Auth writes are limited to 30 requests per IP per 15 minutes; all API calls to 300 per IP per minute.
 
+Network errors and 5xx responses from `/auth/me` do not establish that the session is invalid. Keep the protected URL and draft and offer retry; only 401 requires login.
+
+## Safe creation retries and concurrent edits
+
+`POST /projects`, `POST /works` and `POST /works/:id/reports` accept an optional `Idempotency-Key` (16–128 ASCII letters, digits, underscores or hyphens). The frontend uses a UUID persisted for the lifetime of each draft, including retries, payload edits and full reloads. Clear it only after acknowledged success, explicit discard or starting a fresh draft. Validation failures do not consume the key. Legacy callers that omit it retain ordinary POST semantics.
+
+Keys are scoped to the authenticated user and recorded transactionally in schema migration 3. A retry of the same method, route and payload returns the same resource with status 201, including after a server restart. JSON key ordering and multipart boundaries do not matter; uploaded filenames, content types, sizes and actual bytes do. Reusing a key with a different payload returns 409. A recorded resource that was subsequently deleted returns 410. Current authorization is always checked; a stored key cannot restore revoked access. A replay returns the current resource representation and does not undo subsequent edits.
+
+Works and reports include an opaque `version` string. Send the version that the user actually began editing as a quoted `If-Match` header, e.g. `If-Match: "<version>"`, on `PATCH /works/:id`, `PATCH /works/:id/status`, `PUT /works/:id/assignees` and `PATCH /works/:id/reports/:reportId`. Missing headers return 428; mismatches return 412 without applying the change. Read, compare and write happen in the same transaction. Work versions include metadata, status, assignees and file records; report versions are independent. Persist the baseline version with an edit draft rather than replacing it when background queries refresh. On conflict, preserve the user's input and explicitly review/reload the latest information before retrying. These preconditions do not apply to deletes, project renames or member invitations.
+
 ## Projects
 
 | Method | Path | Body / response |
@@ -83,8 +93,11 @@ Report writes never change work status.
 - 401: missing or expired session.
 - 403: CSRF/origin violation or operation forbidden to a project member.
 - 404: missing resource or resource outside the user's projects.
-- 409: duplicate account or non-empty project deletion.
+- 409: duplicate account, non-empty project deletion or changed payload for a previously committed request key.
+- 410: the resource recorded for a creation retry has since been deleted.
+- 412: the supplied edit version is stale; no change was applied.
 - 413: request/body or project file quota exceeded.
+- 428: an edit is missing its required If-Match version.
 - 429: request limit reached.
 - 500: internal error; detailed cause is logged with requestId.
 - 507: insufficient server disk space.

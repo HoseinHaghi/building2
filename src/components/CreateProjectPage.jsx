@@ -32,7 +32,7 @@ import { styled } from "@mui/material/styles";
 // Explain: Import React Router hooks to navigate and read route state.
 import { useNavigate, useLocation } from "react-router-dom";
 // Explain: Import a preconfigured API client to communicate with the backend.
-import api from "../lib/api";
+import {postOnce} from "../lib/submissions";
 import {useAction} from "../hooks/useAction";
 import {useAuth} from "../auth/AuthContext";
 import {readSessionDraft as readDraft,useSessionDraft} from "../hooks/useSessionDraft";
@@ -163,7 +163,7 @@ const CustomSwitch = styled(Switch)({
 function TabCustom({ isLocked, selectedBreadcrumb, selectedId }) {
   const action=useAction(),auth=useAuth();
   const draftKey="createProjectDraft:"+auth.user.id;
-  const [draft,updateDraft]=useSessionDraft(draftKey,{
+  const [draft,updateDraft,clearDraft]=useSessionDraft(draftKey,{
     title:"",isSubProject:!!selectedId,breadcrumb:selectedBreadcrumb || "",selectedParentId:selectedId || null,
   });
   const {title,isSubProject,breadcrumb,selectedParentId}=draft;
@@ -195,15 +195,13 @@ function TabCustom({ isLocked, selectedBreadcrumb, selectedId }) {
     // Explain: Remove selected parent link.
     setSelectedParentId(null);
     // Explain: Delete any persisted draft in sessionStorage.
-    try {
-      sessionStorage.removeItem(draftKey);
-    } catch { /* The form still resets if browser storage is unavailable. */ }
+    clearDraft();
   };
 
   // Explain: Create a project on the server; root if no parent id is provided.
   const handleCreate = async () => {
     if(!isFormComplete || action.pending || (isSubProject && !selectedParentId))return;
-    const result=await action.run(()=>api.post("/projects",{name:title.trim(),parentId:isSubProject ? selectedParentId : null}));
+    const result=await action.run(()=>postOnce(draftKey,"/projects",{name:title.trim(),parentId:isSubProject ? selectedParentId : null}));
     if(result){resetForm();navigate("/dashboard?projectId="+encodeURIComponent(result.data.id));}
   };
   // Explain: Cancel clears the form and draft, then returns to the dashboard.

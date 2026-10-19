@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import {workVersion,reportVersion} from './versions.js';
 export class HttpError extends Error {
   constructor(status,message) { super(message); this.status=status; }
 }
@@ -56,12 +57,12 @@ export function serializeWork(db,w,userId) {
   const files=db.prepare('SELECT * FROM files WHERE work_id=?').all(w.id);
   const fileData=kind=>{ const f=files.find(f=>f.kind===kind); return f ? { id:f.id,name:f.original_name,size:f.size,url:`/api/files/${f.id}` } : null; };
   const canEdit=w.creator_id===userId || project.owner_id===userId;
-  return { id:w.id,title:w.title,projectId:w.project_id,project:projectPath(db,project).join(' > '),
+  return { id:w.id,version:workVersion(db,w.id),title:w.title,projectId:w.project_id,project:projectPath(db,project).join(' > '),
     floorNum:w.floor_num,floor:`طبقه ${w.floor_num}`,summary:w.summary,prerequisite:w.prerequisite,status:w.status,
     creator,assignees,cover:fileData('cover'),attachment:fileData('attachment'),canEdit,
     canChangeStatus:canEdit || assignees.some(a=>a.id===userId),createdAt:w.created_at,updatedAt:w.updated_at };
 }
 export function serializeReport(db,r,userId,ownerId) {
   const author=db.prepare('SELECT id,name,username FROM users WHERE id=?').get(r.author_id);
-  return { id:r.id,text:r.text,author,createdAt:r.created_at,updatedAt:r.updated_at,canEdit:r.author_id===userId || ownerId===userId };
+  return { id:r.id,version:reportVersion(r),text:r.text,author,createdAt:r.created_at,updatedAt:r.updated_at,canEdit:r.author_id===userId || ownerId===userId };
 }

@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import {clearSubmission} from '../lib/submissions';
 
 export function readSessionDraft(key) {
   try {
@@ -8,6 +9,7 @@ export function readSessionDraft(key) {
 }
 
 export function removeSessionDraft(key) {
+  clearSubmission(key);
   try { sessionStorage.removeItem(key); } catch { /* Storage may be unavailable. */ }
 }
 
@@ -15,6 +17,7 @@ export function useSessionDraft(key, defaults, fresh = false) {
   const [draft, setDraft] = useState(() => {
     const initial = { ...defaults, ...(fresh ? {} : readSessionDraft(key)) };
     if (fresh) {
+      clearSubmission(key);
       try { sessionStorage.setItem(key, JSON.stringify(initial)); } catch { /* Keep editing in memory. */ }
     }
     return initial;

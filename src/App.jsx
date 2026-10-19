@@ -1,6 +1,6 @@
 import { Component,lazy,Suspense } from 'react';
 import { Routes,Route,Navigate,Outlet,Link,useLocation } from 'react-router-dom';
-import { Alert,Box,Button,Typography } from '@mui/material';
+import { Alert,Box,Button,Typography,Paper } from '@mui/material';
 import { useAuth } from './auth/AuthContext';
 import { Loading } from './components/shared';
 const LoginPage=lazy(()=>import('./components/LoginPage'));
@@ -21,6 +21,15 @@ class ErrorBoundary extends Component {
   render(){return this.state.failed ? <Box sx={{p:4}}><Alert severity="error">نمایش صفحه با خطا روبه‌رو شد.</Alert><Button onClick={()=>window.location.reload()}>بارگذاری دوباره</Button></Box> : this.props.children;}
 }
 export default function App() {
+  const auth=useAuth();
+  if(auth.loading)return <Loading/>;
+  if(auth.sessionError)return <Box sx={{minHeight:'100dvh',display:'grid',placeItems:'center',p:2,boxSizing:'border-box'}} dir="rtl">
+    <Paper sx={{p:3,borderRadius:3,width:360,maxWidth:'100%',boxSizing:'border-box',fontFamily:'IRANYekanWeb',textAlign:'center'}}>
+      <Typography component="h1" sx={{fontFamily:'inherit',fontSize:21,mb:2}}>ارتباط با سرور برقرار نشد</Typography>
+      <Alert severity="warning" sx={{fontFamily:'inherit',borderRadius:2,mb:2}}>وضعیت ورود شما هنوز بررسی نشده است. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.</Alert>
+      <Button variant="contained" onClick={auth.retrySession} sx={{bgcolor:'#ff7043',fontFamily:'inherit',borderRadius:2,'&:hover':{bgcolor:'#e65c35'}}}>تلاش دوباره</Button>
+    </Paper>
+  </Box>;
   return <ErrorBoundary><Suspense fallback={<Loading/>}><Routes>
     <Route path="/login" element={<LoginPage/>}/>
     <Route element={<ProtectedLayout/>}>

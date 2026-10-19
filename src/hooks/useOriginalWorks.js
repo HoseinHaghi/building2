@@ -1,5 +1,6 @@
 import { useQuery,useMutation,useQueryClient } from '@tanstack/react-query';
 import api from '../lib/api';
+import {postOnce,versionHeaders} from '../lib/submissions';
 export function useOriginalWorks(filters={},enabled=true) {
   return useQuery({
     queryKey:['works','original',filters],enabled,
@@ -16,6 +17,6 @@ export function useOriginalWorks(filters={},enabled=true) {
 }
 export function useSaveWork(id) {
   const cache=useQueryClient();
-  return useMutation({mutationFn:async form=>(await (id ? api.patch('/works/'+encodeURIComponent(id),form) : api.post('/works',form))).data,
+  return useMutation({mutationFn:async({form,version,scope})=>(await (id ? api.patch('/works/'+encodeURIComponent(id),form,{headers:versionHeaders(version)}) : postOnce(scope,'/works',form))).data,
     onSuccess:()=>cache.invalidateQueries({queryKey:['works']})});
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState,useRef,useEffect } from 'react';
 import { Alert,Box,Button,CircularProgress,Dialog,DialogActions,DialogContent,DialogTitle,Stack,TextField,Typography } from '@mui/material';
 import { useQueryClient } from '@tanstack/react-query';
 import { errorMessage } from '../lib/api';
@@ -36,7 +36,7 @@ export function ConfirmDialog({open,title,description,onClose,onConfirm,pending,
     <DialogActions disableSpacing sx={{gap:1}}><Button onClick={onClose} disabled={pending}>انصراف</Button><Button variant="contained" onClick={onConfirm} disabled={pending}>{confirmLabel}</Button></DialogActions>
   </Dialog>;
 }
-export function TextDialog({open,title,initial='',onClose,onCancel=onClose,onSave,pending,error,label='نام',multiline=false,value:controlledValue,onChange}) {
+export function TextDialog({open,title,initial='',onClose,onCancel=onClose,onSave,pending,error,label='نام',multiline=false,value:controlledValue,onChange,onReview}) {
   const [localValue,setValue]=useState(initial);
   const value=controlledValue ?? localValue;
   // This component is mounted with a key whenever a new edit starts.
@@ -48,16 +48,40 @@ export function TextDialog({open,title,initial='',onClose,onCancel=onClose,onSav
           '& .MuiOutlinedInput-root':{borderRadius:3,bgcolor:'#f5f5f5','& fieldset,&:hover fieldset,&.Mui-focused fieldset':{border:0},'&.Mui-focused':{boxShadow:'0 0 0 1px #ff7043'}},
           '& .MuiInputLabel-root':{right:20,left:'auto',transformOrigin:'top right','&.MuiInputLabel-shrink':{transform:'translate(0,-9px) scale(0.75)'}},
           '& label.Mui-focused':{color:'#ff7043'}}}/>
-        {error && <Alert severity="error" sx={{mt:2}}>{error}</Alert>}</DialogContent>
+        {error && <Alert severity="error" sx={{mt:2}} action={onReview && <Button onClick={onReview} disabled={pending}>بررسی نسخه جدید</Button>}>{error}</Alert>}</DialogContent>
       <DialogActions disableSpacing sx={{gap:1}}><Button onClick={onCancel} disabled={pending}>انصراف</Button><Button type="submit" variant="contained" disabled={pending || !value.trim()}>ذخیره</Button></DialogActions>
     </Box>
   </Dialog>;
 }
-export function DraftTextDialog({draftKey,initial='',onSave,onClose,...props}) {
-  const [draft,update,clear]=useSessionDraft(draftKey,{text:initial});
-  return <TextDialog {...props} initial={initial} value={draft.text} onChange={text=>update({text})}
+export function DraftTextDialog({draftKey,initial='',version,onSave,onClose,conflict,loadLatest,onResolved,...props}) {
+  const [draft,update,clear]=useSessionDraft(draftKey,{text:initial,version});
+  const [review,setReview]=useState(false);
+  return <><TextDialog {...props} initial={initial} value={draft.text} onChange={text=>update({text})}
     onClose={onClose} onCancel={()=>{clear();onClose();}}
-    onSave={async value=>{if(await onSave(value))clear();}}/>;
+    onReview={conflict ? ()=>setReview(true) : undefined}
+    onSave={async value=>{if(await onSave(value,draft.version))clear();}}/>
+    {review && <LatestVersionDialog load={loadLatest} describe={latest=>[{label:'متن گزارش ثبت‌شده',value:latest.text}]}
+      onClose={()=>setReview(false)} onAccept={latest=>{update({text:latest.text,version:latest.version});onResolved?.();setReview(false);}}/>}
+  </>;
+}
+export function LatestVersionDialog({load,describe,onClose,onAccept}) {
+  const loader=useRef(load),[latest,setLatest]=useState(null),[error,setError]=useState(''),[attempt,setAttempt]=useState(0);
+  useEffect(()=>{
+    let active=true;setLatest(null);setError('');
+    Promise.resolve().then(()=>loader.current()).then(data=>{if(active)setLatest(data);}).catch(cause=>{if(active)setError(errorMessage(cause));});
+    return()=>{active=false;};
+  },[attempt]);
+  return <Dialog open onClose={onClose} fullWidth maxWidth="sm" PaperProps={dialogPaper}>
+    <DialogTitle>بررسی نسخه جدید</DialogTitle>
+    <DialogContent>
+      <Alert severity="warning" sx={{mb:2}}>تغییرات شما هنوز ذخیره نشده‌اند. فقط با انتخاب «استفاده از نسخه جدید»، اطلاعات فرم با نسخه زیر جایگزین می‌شود.</Alert>
+      {error ? <Alert severity="error" action={<Button onClick={()=>setAttempt(value=>value+1)}>تلاش دوباره</Button>}>{error}</Alert> : !latest ? <Loading/> :
+        <Stack spacing={1.5}>{describe(latest).map(({label,value})=><Box key={label} sx={{p:1.5,bgcolor:'#f5f5f5',borderRadius:2}}>
+          <Typography sx={{fontSize:12,color:'#757575',mb:0.5}}>{label}</Typography><Typography sx={{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:14}}>{value || '—'}</Typography>
+        </Box>)}</Stack>}
+    </DialogContent>
+    <DialogActions disableSpacing sx={{gap:1}}><Button onClick={onClose}>بازگشت به ویرایش</Button><Button variant="contained" disabled={!latest} onClick={()=>onAccept(latest)}>استفاده از نسخه جدید</Button></DialogActions>
+  </Dialog>;
 }
 export function RetryAll() {
   const cache=useQueryClient();
